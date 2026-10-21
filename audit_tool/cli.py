@@ -11,12 +11,19 @@ from .ingest import ingest_file
 from .models import EDITABLE, SOURCE_TYPES, Event, validate_field
 from .report import LEDGER_FIELDS, render_json, render_markdown
 from .rules import audit, flag
-from .store import Workspace
+from .store import Case, Workspace, sha256_file
+
+
+def print_head(case: Case) -> None:
+    print(f"Ledger head: {case.ledger.head()}")
+    print("  (Save this hash off this machine. `audit verify --expect <hash>` later proves "
+          "nothing before it was rewritten.)")
 
 
 def cmd_new(ws: Workspace, a) -> None:
     case = ws.create_case(a.case, a.title, a.subject, a.institution)
     print(f"Created case {case.id} at {case.dir}")
+    print_head(case)
 
 
 def cmd_list(ws: Workspace, a) -> None:
@@ -36,13 +43,18 @@ def cmd_ingest(ws: Workspace, a) -> None:
         if not path.is_file():
             print(f"skip: {path} is not a file", file=sys.stderr)
             continue
-        artifact = case.store_artifact(path)
+        digest = sha256_file(path)
         result = ingest_file(path, a.type, use_ocr=not a.no_ocr)
         for warning in result.warnings:
             print(f"warning: {path.name}: {warning}", file=sys.stderr)
         if not result.events:
-            print(f"{path.name}: no adverse decisions found (artifact not linked)")
+            print(f"{path.name}: no adverse decisions found (not stored)")
             continue
+        # Store only once there is an event to link it to, so the evidence folder
+        # never holds files the ledger doesn't list.
+        artifact = case.store_artifact(path)
+        if artifact["sha256"] != digest:
+            raise ValueError(f"{path} changed while it was being ingested; try again")
         linked = [artifact]
         if result.extracted and result.extracted.text.strip():
             linked.append(case.store_derived_text(artifact, result.extracted.text, result.extracted.method))
@@ -55,6 +67,7 @@ def cmd_ingest(ws: Workspace, a) -> None:
             via = f" [{result.extracted.method}]" if result.extracted and result.extracted.method else ""
             print(f"{ev.id}  {ev.source_type:11} {ev.decision or '(no decision found)':28} "
                   f"{ev.status_code}  ← {path.name}{via}")
+    print_head(case)
 
 
 def cmd_extract(ws: Workspace, a) -> None:
@@ -75,6 +88,7 @@ def cmd_add(ws: Workspace, a) -> None:
         ev.origin[name.strip()] = "confirmed"
     case.add_event(ev)
     print(f"Added {ev.id}")
+    print_head(case)
 
 
 def cmd_edit(ws: Workspace, a) -> None:
@@ -87,12 +101,14 @@ def cmd_edit(ws: Workspace, a) -> None:
         changes[name.strip()] = validate_field(name.strip(), value)
     case.update_event(a.event, changes, a.reason)
     print(f"Updated {a.event}: {', '.join(changes)}")
+    print_head(case)
 
 
 def cmd_attach(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
     art = case.link_artifact(a.event, Path(a.file))
     print(f"Attached {art['original_name']} to {a.event} (sha256 {art['sha256'][:16]}…)")
+    print_head(case)
 
 
 def cmd_show(ws: Workspace, a) -> None:
@@ -120,13 +136,24 @@ def cmd_check(ws: Workspace, a) -> None:
 
 
 def cmd_verify(ws: Workspace, a) -> None:
-    problems = ws.open_case(a.case).verify()
+    case = ws.open_case(a.case)
+    problems = case.verify(expect_head=a.expect)
     if problems:
         print("INTEGRITY FAILED")
         for p in problems:
             print(f"  - {p}")
         sys.exit(2)
-    print("OK: ledger chain intact and all evidence files match their hashes.")
+    print("OK: ledger chain intact, every evidence file matches its hash, and the "
+          "evidence folder holds only recorded files.")
+    if a.expect:
+        print(f"OK: anchored head {a.expect} is in the ledger; history up to it is unchanged.")
+    else:
+        print("Note: without --expect, this can't rule out the whole ledger having been replaced.")
+    print(f"Ledger head: {case.ledger.head()}")
+
+
+def cmd_head(ws: Workspace, a) -> None:
+    print(ws.open_case(a.case).ledger.head())
 
 
 def cmd_report(ws: Workspace, a) -> None:
@@ -195,7 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("verify", help="verify ledger chain and evidence hashes")
     s.add_argument("case")
+    s.add_argument("--expect", metavar="HASH", help="a head hash saved earlier; fails if it is no longer in the ledger")
     s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser("head", help="print the ledger head hash, to save somewhere off this machine")
+    s.add_argument("case")
+    s.set_defaults(func=cmd_head)
 
     s = sub.add_parser("report", help="render the case file")
     s.add_argument("case")
@@ -209,7 +241,8 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     # Windows consoles default to a legacy code page that can't print evidence text.
     for stream in (sys.stdout, sys.stderr):
-        stream.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     try:
         args.func(Workspace(Path(args.root)), args)
     except (ValueError, KeyError, FileNotFoundError, FileExistsError) as exc:

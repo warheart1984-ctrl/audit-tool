@@ -19,6 +19,10 @@ from statistics import mean, median
 # A page with fewer readable characters than this is treated as scanned.
 MIN_PAGE_CHARS = 40
 PDF_RENDER_DPI = 300
+# Evidence is untrusted input; bound the work any one file can cause.
+MAX_PDF_PAGES = 500  # pages whose text layer is read
+MAX_OCR_PAGES = 25  # scanned pages rendered and OCR'd
+MAX_IMAGE_PIXELS = 50_000_000
 
 
 @dataclass
@@ -97,7 +101,10 @@ def ocr_image(img) -> tuple[str, str, float | None]:
 def extract_image(path: Path) -> ExtractedText:
     from PIL import Image
 
-    with Image.open(path) as img:
+    with Image.open(path) as img:  # reads only the header until load()
+        if img.width * img.height > MAX_IMAGE_PIXELS:
+            return ExtractedText(warnings=[f"image is {img.width}x{img.height}, over the "
+                                           f"{MAX_IMAGE_PIXELS}-pixel OCR limit; not read"])
         img.load()
         text, engine, conf = ocr_image(img)
     return ExtractedText(text=text, method=f"ocr:{engine}", confidence=conf)
@@ -112,16 +119,29 @@ def extract_pdf(path: Path) -> ExtractedText:
 
     out = ExtractedText()
     methods, confs, pages = set(), [], []
+    pdf = None  # rendered copy, opened only if a page needs OCR
+    ocr_pages = 0
+    total = len(reader.pages)
+    if total > MAX_PDF_PAGES:
+        out.warnings.append(f"PDF has {total} pages; only the first {MAX_PDF_PAGES} were read")
     for i, page in enumerate(reader.pages):
+        if i >= MAX_PDF_PAGES:
+            break
         text = page.extract_text() or ""
         if len("".join(text.split())) >= MIN_PAGE_CHARS:
             methods.add("pdf-text")
             pages.append(text)
             continue
+        if ocr_pages >= MAX_OCR_PAGES:
+            out.warnings.append(f"page {i + 1} has no text layer; OCR limit of {MAX_OCR_PAGES} pages reached")
+            pages.append(text)
+            continue
         try:
             import pypdfium2 as pdfium
 
-            pdf = pdfium.PdfDocument(str(path))
+            if pdf is None:
+                pdf = pdfium.PdfDocument(str(path))
+            ocr_pages += 1
             img = pdf[i].render(scale=PDF_RENDER_DPI / 72).to_pil()
             ocr_text, engine, conf = ocr_image(img)
             methods.add(f"ocr:{engine}")
@@ -134,6 +154,8 @@ def extract_pdf(path: Path) -> ExtractedText:
         except RuntimeError as exc:
             out.warnings.append(f"page {i + 1}: {exc}")
             pages.append(text)
+    if pdf is not None:
+        pdf.close()
     out.text = "\n\n".join(pages)
     out.method = "+".join(sorted(methods)) or "none"
     out.confidence = mean(confs) if confs else None

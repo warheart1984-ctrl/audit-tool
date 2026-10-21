@@ -24,6 +24,10 @@ CSV_EXT = {".csv", ".tsv"}
 PDF_EXT = {".pdf"}
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
 
+# Evidence is untrusted input; bound the work any one file can cause.
+MAX_TEXT_BYTES = 20 * 1024 * 1024  # emails, letters, transcripts
+MAX_CSV_ROWS = 100_000
+
 # 550 5.7.193 / 550.5.7.193 / 554-5.7.1
 SMTP_CODE = re.compile(r"\b([245]\d\d)[\s.\-]?([245]\.\d{1,3}\.\d{1,3})\b")
 REASON_CODE = re.compile(r"\b(?:reason|error|decline|denial|response)\s*code[:#\s]*([A-Z0-9][A-Z0-9.\-]{1,20})\b", re.I)
@@ -144,7 +148,8 @@ def detect_type(path: Path, override: str | None = None) -> str:
     if ext in PDF_EXT:
         return "letter"
     if ext in TEXT_EXT:
-        head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+        with path.open("rb") as fh:
+            head = fh.read(2000).decode("utf-8", errors="replace")
         if re.search(r"^(From|To|Subject|Date):", head, re.M):
             return "email"
         if re.search(r"^\s*\[?\d{1,2}:\d{2}", head, re.M) and re.search(r"^\s*[\w .]+:\s", head, re.M):
@@ -324,13 +329,31 @@ def _col(row: dict, *names: str) -> str:
     return ""
 
 
-def ingest_csv(path: Path) -> list[dict]:
+STATUS_COLUMNS = ("status", "result", "decision", "state")
+
+
+def ingest_csv(path: Path) -> tuple[list[dict], list[str]]:
     """One event per row whose status is anything other than a plain success."""
-    delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
-    events = []
+    warnings: list[str] = []
     with path.open(encoding="utf-8-sig", newline="") as fh:
-        for i, row in enumerate(csv.DictReader(fh, delimiter=delimiter), start=2):
-            status = _col(row, "status", "result", "decision", "state")
+        sample = fh.read(8192)
+        fh.seek(0)
+        try:
+            delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+        reader = csv.DictReader(fh, delimiter=delimiter)
+        headers = {h.strip().lower() for h in (reader.fieldnames or []) if h}
+        if not headers & set(STATUS_COLUMNS):
+            # Without a status column every row would be skipped, silently reporting "nothing adverse".
+            return [], [f"no status column found (looked for {', '.join(STATUS_COLUMNS)}; "
+                        f"columns are: {', '.join(sorted(headers)) or 'none'}); nothing ingested"]
+        events = []
+        for i, row in enumerate(reader, start=2):
+            if i - 1 > MAX_CSV_ROWS:
+                warnings.append(f"stopped after {MAX_CSV_ROWS} rows; the rest were not read")
+                break
+            status = _col(row, *STATUS_COLUMNS)
             if status.lower() in ("", "posted", "completed", "complete", "success", "settled", "approved", "cleared"):
                 continue
             desc = _col(row, "description", "merchant", "payee", "memo", "details")
@@ -345,7 +368,7 @@ def ingest_csv(path: Path) -> list[dict]:
                 "notes": f"CSV row {i}",
             }
             events.append(_mark({k: v for k, v in fields_.items() if v}))
-    return events
+    return events, warnings
 
 
 def ingest_binary(path: Path, kind: str, use_ocr: bool = True) -> IngestResult:
@@ -365,10 +388,18 @@ def ingest_binary(path: Path, kind: str, use_ocr: bool = True) -> IngestResult:
 
 
 def ingest_file(path: Path, source_type: str | None = None, use_ocr: bool = True) -> IngestResult:
-    kind = detect_type(path, source_type)
     ext = path.suffix.lower()
+    size = path.stat().st_size
+    # CSVs are streamed with a row cap instead; emails and text are read whole.
+    if ext in EMAIL_EXT | TEXT_EXT and size > MAX_TEXT_BYTES:
+        return IngestResult([{"source_type": source_type or "other", "origin": {},
+                              "notes": f"File too large for automatic extraction ({size} bytes). "
+                                       "Preserved as evidence; enter its facts with `audit edit`."}],
+                            warnings=[f"{size} bytes exceeds the {MAX_TEXT_BYTES}-byte text limit; not parsed"])
+    kind = detect_type(path, source_type)
     if ext in CSV_EXT:
-        return IngestResult(ingest_csv(path))
+        events, warnings = ingest_csv(path)
+        return IngestResult(events, warnings=warnings)
     if ext in EMAIL_EXT:
         return IngestResult(ingest_email(path))
     if ext in TEXT_EXT:

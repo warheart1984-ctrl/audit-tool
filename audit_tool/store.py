@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 
 from .ledger import Ledger, now_iso
-from .models import Artifact, Event
+from .models import EDITABLE, Artifact, Event
 
 
 def sha256_file(path: Path) -> str:
@@ -41,25 +41,54 @@ class Case:
                 return entry["payload"]
         return {"id": self.id}
 
-    def events(self) -> dict[str, Event]:
-        """Replay the ledger into the current state of every event."""
+    def replay(self) -> tuple[dict[str, Event], list[str]]:
+        """Rebuild every event's current state from the ledger.
+
+        Entries that can't apply (an update to an event that doesn't exist, a
+        duplicate event id, an unknown field) are skipped and reported rather
+        than aborting, so one bad line can't make the whole case unreadable.
+        """
         events: dict[str, Event] = {}
+        problems: list[str] = []
         for entry in self.ledger.entries():
-            kind, p = entry["kind"], entry["payload"]
+            seq, kind, p = entry.get("seq"), entry.get("kind"), entry.get("payload") or {}
             if kind == "event.add":
-                events[p["id"]] = Event.from_dict(p)
-            elif kind == "event.update":
-                ev = events[p["id"]]
-                for name, value in p["changes"].items():
+                if p.get("id") in events:
+                    problems.append(f"entry {seq}: duplicate event id {p.get('id')} (ignored)")
+                    continue
+                events[p.get("id")] = Event.from_dict(p)
+            elif kind in ("event.update", "artifact.link"):
+                target = p.get("id") if kind == "event.update" else p.get("event_id")
+                if target not in events:
+                    problems.append(f"entry {seq}: {kind} refers to unknown event {target} (ignored)")
+                    continue
+                ev = events[target]
+                if kind == "artifact.link":
+                    ev.artifacts.append(p.get("artifact") or {})
+                    continue
+                for name, value in (p.get("changes") or {}).items():
+                    if name not in EDITABLE:
+                        problems.append(f"entry {seq}: update to non-editable field '{name}' (ignored)")
+                        continue
                     setattr(ev, name, value)
                     ev.origin[name] = "confirmed"
-            elif kind == "artifact.link":
-                events[p["event_id"]].artifacts.append(p["artifact"])
-        return events
+            elif kind != "case.create":
+                problems.append(f"entry {seq}: unknown entry kind '{kind}' (ignored)")
+        return events, problems
+
+    def events(self) -> dict[str, Event]:
+        return self.replay()[0]
 
     def next_event_id(self) -> str:
-        n = sum(1 for e in self.ledger.entries() if e["kind"] == "event.add")
-        return f"EVT-{n + 1:04d}"
+        # One past the highest id ever added, so ids are never reused even if
+        # the ledger contains out-of-order or hand-made entries.
+        highest = 0
+        for e in self.ledger.entries():
+            if e.get("kind") == "event.add":
+                m = re.fullmatch(r"EVT-(\d+)", str((e.get("payload") or {}).get("id", "")))
+                if m:
+                    highest = max(highest, int(m.group(1)))
+        return f"EVT-{highest + 1:04d}"
 
     def store_artifact(self, src: Path) -> dict:
         """Copy a file into the evidence folder (idempotent by content hash)."""
@@ -112,30 +141,71 @@ class Case:
         self.ledger.append("artifact.link", {"event_id": event_id, "artifact": artifact})
         return artifact
 
-    def verify(self) -> list[str]:
+    def verify(self, expect_head: str | None = None) -> list[str]:
+        """Check the ledger chain, every recorded evidence file, and the evidence folder.
+
+        `expect_head` is a head hash saved earlier (see `Ledger.head`). The chain
+        alone can't detect a wholesale rewrite; a hash kept somewhere else can.
+        """
         problems = self.ledger.verify()
-        seen = set()
-        for ev in self.events().values():
+        if problems and problems[0].startswith("line "):
+            return problems  # unreadable ledger: nothing below can be trusted
+        if expect_head:
+            if not self.ledger.contains(expect_head):
+                problems.append(f"anchored head {expect_head} is not in this ledger: "
+                                "history recorded before it was rewritten or replaced")
+        events, replay_problems = self.replay()
+        problems += replay_problems
+
+        case_root = self.dir.resolve()
+        recorded = set()
+        for ev in events.values():
             for art in ev.artifacts:
-                if art["stored_path"] in seen:
+                rel = str(art.get("stored_path", ""))
+                if rel in recorded:
                     continue
-                seen.add(art["stored_path"])
-                path = self.dir / art["stored_path"]
-                if not path.exists():
-                    problems.append(f"{art['stored_path']}: evidence file is missing")
-                elif sha256_file(path) != art["sha256"]:
-                    problems.append(f"{art['stored_path']}: evidence file changed since it was recorded")
+                recorded.add(rel)
+                path = self.dir / rel
+                if not path.resolve().is_relative_to(case_root) or not rel.startswith("evidence/"):
+                    problems.append(f"{rel}: recorded evidence path points outside the evidence folder")
+                elif path.is_symlink():
+                    problems.append(f"{rel}: evidence file is a symbolic link")
+                elif not path.is_file():
+                    problems.append(f"{rel}: evidence file is missing")
+                elif sha256_file(path) != art.get("sha256"):
+                    problems.append(f"{rel}: evidence file changed since it was recorded")
+
+        # An evidence folder should hold exactly what the ledger lists.
+        if self.evidence_dir.exists():
+            for path in sorted(self.evidence_dir.rglob("*")):
+                rel = path.relative_to(self.dir).as_posix()
+                if path.is_symlink() and rel not in recorded:
+                    problems.append(f"{rel}: symbolic link in the evidence folder")
+                elif path.is_file() and rel not in recorded:
+                    problems.append(f"{rel}: file in the evidence folder is not recorded in the ledger")
         return problems
+
+
+CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class Workspace:
     def __init__(self, root: Path):
         self.root = root
 
-    def create_case(self, case_id: str, title: str, subject: str = "", institution: str = "") -> Case:
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", case_id):
-            raise ValueError("Case id may only contain letters, digits, '.', '_' and '-'")
+    def _case_dir(self, case_id: str) -> Path:
+        """Map a case id to its folder, refusing anything that could leave the workspace."""
+        if not CASE_ID.fullmatch(case_id) or ".." in case_id:
+            raise ValueError("Case id must start with a letter or digit and contain only "
+                             "letters, digits, '.', '_' and '-' (no '..')")
         directory = self.root / case_id
+        root = self.root.resolve()
+        if directory.resolve().parent != root:
+            raise ValueError(f"Case id '{case_id}' does not resolve to a folder directly inside {root}")
+        return directory
+
+    def create_case(self, case_id: str, title: str, subject: str = "", institution: str = "") -> Case:
+        directory = self._case_dir(case_id)
         if (directory / "ledger.jsonl").exists():
             raise FileExistsError(f"Case {case_id} already exists at {directory}")
         directory.mkdir(parents=True, exist_ok=True)
@@ -147,7 +217,7 @@ class Workspace:
         return case
 
     def open_case(self, case_id: str) -> Case:
-        directory = self.root / case_id
+        directory = self._case_dir(case_id)
         if not (directory / "ledger.jsonl").exists():
             raise FileNotFoundError(f"No case '{case_id}' under {self.root}")
         return Case(directory)
@@ -155,4 +225,5 @@ class Workspace:
     def list_cases(self) -> list[Case]:
         if not self.root.exists():
             return []
-        return [Case(d) for d in sorted(self.root.iterdir()) if (d / "ledger.jsonl").exists()]
+        return [Case(d) for d in sorted(self.root.iterdir())
+                if CASE_ID.fullmatch(d.name) and ".." not in d.name and (d / "ledger.jsonl").exists()]

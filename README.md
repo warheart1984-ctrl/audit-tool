@@ -70,9 +70,42 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
 
 ## Integrity
 
-- Evidence files are copied byte for byte into `cases/<id>/evidence/` and identified by SHA-256.
+- Evidence files are copied byte for byte into `cases/<id>/evidence/` and identified by SHA-256. A file is stored only when it produces an event to link it to.
 - `ledger.jsonl` is append-only and hash-chained. Corrections are added as new entries, so the history stays visible.
-- `verify` reports any edited ledger line or any changed or missing evidence file.
+- `verify` reports:
+  - edited, deleted or unreadable ledger lines;
+  - entries that refer to events that don't exist;
+  - evidence files that changed or went missing;
+  - files or symbolic links in `evidence/` that the ledger doesn't list.
+- Case IDs must be plain names (letters, digits, `.`, `_`, `-`; no `..`), so a case can never be read or written outside the `cases/` folder.
+
+### What the hash chain does *not* prove
+
+Someone with write access to the case folder can replace the whole ledger with a new chain that is internally consistent, and plain `verify` can't tell. The defence is the **ledger head**, the hash of the latest entry:
+
+```bash
+python -m audit_tool head bank-2026                    # also printed after every change
+python -m audit_tool verify bank-2026 --expect <hash>  # fails if that hash is no longer in the ledger
+```
+
+Save the head somewhere off this machine after key steps. You could email it to yourself or to the other party, or include it in a complaint. Entries are only ever appended, so a saved head stays valid as the case grows. If the history before it is ever rewritten, `--expect` fails. Each report also prints the current head.
+
+### Limits on untrusted files
+
+Evidence may come from the party being audited, so each file's cost is bounded:
+- Text and email files over 20 MB are stored but not parsed.
+- CSVs are read up to 100,000 rows.
+- PDFs are read up to 500 pages, and at most 25 scanned pages are OCR'd.
+- Images over 50 megapixels are not OCR'd.
+
+The limits are constants at the top of `ingest.py` and `extract.py`. Report text from evidence is escaped, so a document can't inject headings, links or fake findings into the case file.
+
+## Tests
+
+```bash
+pip install -e ".[ocr,dev]"
+python -m pytest
+```
 
 ## Limits
 

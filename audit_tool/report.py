@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 
 from .ledger import now_iso
@@ -22,8 +23,27 @@ LEDGER_FIELDS = [
 ]
 
 
-def _cell(text: str) -> str:
-    return (text or "—").replace("|", "\\|").replace("\n", " ")
+# Everything below comes from evidence, which may be written by the party being
+# audited. It must render as text, never as report structure (headings, links,
+# fake findings), so it is flattened and escaped before it reaches the Markdown.
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>|#~!{}()])")
+
+
+def _md(text) -> str:
+    """Inline-safe text: one line, Markdown punctuation backslash-escaped."""
+    return _MD_SPECIAL.sub(r"\\\1", " ".join(str(text or "").split()))
+
+
+def _cell(text) -> str:
+    return _md(text) or "—"
+
+
+def _fenced(lines: list[str]) -> list[str]:
+    """A code block whose fence is longer than any backtick run inside it, so it can't be closed early."""
+    flat = [" ".join(str(line).split()) for line in lines]
+    longest = max((len(run) for line in flat for run in re.findall(r"`+", line)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [fence + "text", *flat, fence]
 
 
 def _value(ev: Event, name: str) -> str:
@@ -43,12 +63,12 @@ def render_markdown(case: Case) -> str:
     for f in findings:
         by_event.setdefault(f.event_id, []).append(f)
 
-    lines = [f"# Case file: {info.get('title', case.id)}", ""]
-    lines += [f"- **Case ID:** {case.id}"]
+    lines = [f"# Case file: {_md(info.get('title', case.id))}", ""]
+    lines += [f"- **Case ID:** {_md(case.id)}"]
     if info.get("subject"):
-        lines.append(f"- **Subject:** {info['subject']}")
+        lines.append(f"- **Subject:** {_md(info['subject'])}")
     if info.get("institution"):
-        lines.append(f"- **Institution:** {info['institution']}")
+        lines.append(f"- **Institution:** {_md(info['institution'])}")
     lines += [f"- **Generated:** {now_iso()}",
               f"- **Ledger integrity:** {'VERIFIED' if not problems else 'FAILED, see Integrity section'}", ""]
 
@@ -62,7 +82,7 @@ def render_markdown(case: Case) -> str:
 
     lines += ["## Timeline", "", "| ID | Timestamp | Type | Decision | Code | Gate |", "|---|---|---|---|---|---|"]
     for ev in ordered:
-        lines.append(f"| {ev.id} | {_cell(ev.timestamp)} | {ev.source_type} | {_cell(ev.decision)} "
+        lines.append(f"| {_cell(ev.id)} | {_cell(ev.timestamp)} | {_cell(ev.source_type)} | {_cell(ev.decision)} "
                      f"| {_cell(ev.status_code)} | {flag(ev)} |")
     lines.append("")
 
@@ -71,46 +91,50 @@ def render_markdown(case: Case) -> str:
         lines += ["No adverse decisions recorded.", ""]
     for ev in adverse:
         evf = by_event.get(ev.id, [])
-        lines += [f"### Decision {ev.id}: {ev.decision}", ""]
+        lines += [f"### Decision {_md(ev.id)}: {_md(ev.decision)}", ""]
         # Factual statement block: what the record shows, one line per gap.
-        lines.append("```text")
-        lines.append(f"Decision {ev.id} ({ev.decision}{', ' + ev.status_code if ev.status_code else ''})"
-                     f"{' on ' + ev.timestamp if ev.timestamp else ''}.")
-        for f in evf:
-            if f.severity != "info" or f.rule == "AUTO":
-                lines.append(f.statement)
-        lines.append("```")
+        block = [f"Decision {ev.id} ({ev.decision}{', ' + ev.status_code if ev.status_code else ''})"
+                 f"{' on ' + ev.timestamp if ev.timestamp else ''}."]
+        block += [f.statement for f in evf if f.severity != "info" or f.rule == "AUTO"]
+        lines += _fenced(block)
         lines += ["", "| Finding | Question | Severity | Statement |", "|---|---|---|---|"]
         for f in evf:
-            lines.append(f"| {f.id} | {f.question} | {f.severity} | {_cell(f.statement)} |")
+            lines.append(f"| {f.id} | {_cell(f.question)} | {f.severity} | {_cell(f.statement)} |")
         lines.append("")
 
     lines += ["## Evidence ledger", ""]
     for ev in ordered:
-        lines += [f"### {ev.id}", "", "```text", f"ID: {ev.id}"]
+        lines += [f"### {_md(ev.id)}", ""]
+        block = [f"ID: {ev.id}"]
         for label, name in LEDGER_FIELDS:
             val = _value(ev, name)
             if val:
-                lines.append(f"{label}: {val}")
-        lines.append("```")
+                block.append(f"{label}: {val}")
+        lines += _fenced(block)
         for art in ev.artifacts:
-            lines.append(f"- Artifact `{art['original_name']}` → `{art['stored_path']}`, "
-                         f"{art['size']} bytes, SHA-256 `{art['sha256']}`")
+            lines.append(f"- Artifact {_md(art.get('original_name'))} → {_md(art.get('stored_path'))}, "
+                         f"{_md(art.get('size'))} bytes, SHA-256 {_md(art.get('sha256'))}")
         lines.append("")
 
     lines += ["## Integrity", ""]
     if problems:
-        lines += [f"- {p}" for p in problems]
+        lines += [f"- {_md(p)}" for p in problems]
     else:
-        lines.append(f"All {len(case.ledger.entries())} ledger entries chain correctly and every "
-                     "evidence file matches its recorded SHA-256 hash.")
+        lines.append(f"All {len(case.ledger.entries())} ledger entries chain correctly, every "
+                     "evidence file matches its recorded SHA-256 hash, and the evidence folder "
+                     "holds no unrecorded files.")
+    lines += ["", f"Ledger head at the time of this report: `{case.ledger.head()}`. Anyone holding "
+              "an earlier head hash can confirm with `audit verify --expect <hash>` that the "
+              "history up to that point has not been rewritten."]
     lines += ["", "## Method and limitations", "",
               "- Each finding describes what is **absent from the collected record**. It does not "
               "claim that something did not happen inside the institution.",
               "- Fields marked *(extracted, unconfirmed)* were pulled out automatically and have not "
               "yet been checked by a person.",
               "- Copies of the evidence are stored byte for byte and identified by SHA-256. The ledger "
-              "is append-only and hash-chained, so any later change to a recorded entry can be detected.",
+              "is append-only and hash-chained, so editing or deleting a recorded entry is detected. "
+              "Replacing the whole ledger with a new, consistent one is only detected against a head "
+              "hash saved somewhere else beforehand.",
               "- This report is not legal advice.", ""]
     return "\n".join(lines)
 

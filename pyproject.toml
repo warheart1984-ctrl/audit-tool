@@ -11,9 +11,20 @@ license = { text = "MIT" }
 
 [project.optional-dependencies]
 # Text from screenshots (OCR) and PDF letters, including scanned ones.
-ocr = ["Pillow", "pypdf", "pypdfium2", "rapidocr_onnxruntime"]
-# Only needed to regenerate tests/fixtures.
-dev = ["reportlab"]
+# These parse untrusted files, so floors sit at or above releases with known
+# security fixes (Pillow 10.3 for CVE-2024-28219, pypdf 6.0 for CVE-2025-55197),
+# and ceilings stop an untested major version arriving silently.
+ocr = [
+    "Pillow>=10.3.0,<13",
+    "pypdf>=6.0.0,<7",
+    "pypdfium2>=4.30.0,<6",
+    "rapidocr_onnxruntime>=1.3.24,<2",
+]
+# Tests, and regenerating tests/fixtures.
+dev = ["pytest>=8", "reportlab>=4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [project.scripts]
 audit = "audit_tool.cli:main"
