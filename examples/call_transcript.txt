@@ -1,0 +1,6 @@
+2026-10-12 14:05
+Customer: Why was my account restricted?
+Agent: I can see a flag from our systems, but I can't see the reason.
+Agent: I'm not able to override it or tell you who made the decision.
+Customer: Can I appeal?
+Agent: You can file a dispute through the online portal.

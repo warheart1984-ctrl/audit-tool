@@ -1,0 +1,11 @@
+From: Microsoft Outlook <postmaster@outlook.com>
+To: customer@example.com
+Date: Tue, 14 Oct 2026 09:12:44 +0000
+Subject: Undeliverable: Request to reverse account restriction
+Content-Type: text/plain; charset=utf-8
+
+Your message to support@examplebank.com couldn't be delivered.
+
+Remote server returned '550 5.7.193 External sender blocked by organization policy'
+
+This is an automatically generated message. Do not reply.

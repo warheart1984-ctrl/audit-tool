@@ -1,0 +1,5 @@
+Date,Description,Amount,Status,Reason Code,Reason
+2026-10-09,Payroll deposit,2450.00,Posted,,
+2026-10-10,Rent payment ACH,-1200.00,Declined,R16,Account frozen
+2026-10-11,Grocery store,-84.12,Declined,,
+2026-10-11,Utility autopay,-96.50,Completed,,

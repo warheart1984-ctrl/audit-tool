@@ -1,0 +1,10 @@
+Example Bank N.A.
+October 10, 2026
+
+Dear Customer,
+
+Your account ending 4421 has been restricted due to activity that does not meet our risk standards.
+This decision was made under Section 12.3 of the Deposit Account Agreement.
+
+Sincerely,
+Account Services

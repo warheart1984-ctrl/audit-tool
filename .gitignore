@@ -1,0 +1,11 @@
+cases/
+__pycache__/
+*.egg-info/
+tests/fixtures/
+# Real evidence never belongs in the repo: keep personal files out of the root.
+/*.jpg
+/*.jpeg
+/*.png
+/*.heic
+/*.pdf
+/*.eml
