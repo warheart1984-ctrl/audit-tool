@@ -1,5 +1,7 @@
 # Audit tool
 
+[![tests](https://github.com/warheart1984-ctrl/audit-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/warheart1984-ctrl/audit-tool/actions/workflows/tests.yml)
+
 Builds a case file around automated decisions, such as rejected emails, declined payments or restricted accounts. It shifts the claim from *"I think the bank treated me unfairly"* to findings like these:
 
 ```text
