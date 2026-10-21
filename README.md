@@ -77,3 +77,7 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
 ## Limits
 
 Findings describe what is missing from the *collected record*, not what happened inside the institution. Text extraction is pattern-based, so review each event. This is not legal advice.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
