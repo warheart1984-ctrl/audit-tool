@@ -76,8 +76,13 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
   - edited, deleted or unreadable ledger lines;
   - entries that refer to events that don't exist;
   - evidence files that changed or went missing;
-  - files or symbolic links in `evidence/` that the ledger doesn't list.
-- Case IDs must be plain names (letters, digits, `.`, `_`, `-`; no `..`), so a case can never be read or written outside the `cases/` folder.
+  - files or symbolic links in `evidence/` that the ledger doesn't list;
+  - malformed entries, which are skipped and listed instead of crashing the tool;
+  - fields on a ledger line that the hash doesn't cover, so nothing can ride along uncommitted;
+  - "confirmed" claimed when an event is created. Only an edit (`audit edit`, with a reason) confirms a fact.
+- Appends take a lock file, so two processes writing to one case can't lose or interleave entries.
+- Case IDs must be plain names: letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit, with no `..` and no Windows device names such as `CON`. A case can never be read or written outside the `cases/` folder, and two IDs can't name the same folder.
+- Extraction runs on documents the audited party wrote, so extracted values are not trusted to clear findings: a document claiming "manually reviewed" or "appeal to the ombudsman" produces a *claimed, unconfirmed* finding instead of silence, and only a field confirmed by a person (`audit edit`) clears it or satisfies the PASS gate.
 
 ### What the hash chain does *not* prove
 
@@ -89,6 +94,30 @@ python -m audit_tool verify bank-2026 --expect <hash>  # fails if that hash is n
 ```
 
 Save the head somewhere off this machine after key steps. You could email it to yourself or to the other party, or include it in a complaint. Entries are only ever appended, so a saved head stays valid as the case grows. If the history before it is ever rewritten, `--expect` fails. Each report also prints the current head.
+
+Two things an anchored head still does *not* prove:
+
+- **Anything appended after it.** `verify --expect` says how many entries follow the anchor and that they are not covered by it — review them and save the new head. An anchor also can't notice entries *deleted* from the tail after it, so re-anchor after every session.
+- **Who wrote an entry.** For that, entries need signatures.
+
+### Signing entries
+
+Give the tool a signing key and every new entry records an `actor` and an HMAC-SHA256 `sig` over its hash:
+
+```bash
+python -m audit_tool keygen ~/audit-signing.key   # keep it OUTSIDE the cases folder and out of git
+python -m audit_tool --key-file ~/audit-signing.key --actor alex ingest bank-2026 letter.pdf
+python -m audit_tool --key-file ~/audit-signing.key verify bank-2026
+```
+
+Or set `AUDIT_KEY_FILE` and `AUDIT_ACTOR`. With a key, `verify` flags:
+- entries appended without the key after signing began;
+- entries signed by a different key;
+- a ledger with no signed entries at all.
+
+Unsigned history from before signing began is allowed and reported as such. That also means stripping the signatures from the *earliest* entries isn't flagged. Their content stays protected, because the signed entries after them commit to it through the chain.
+
+Whoever holds the key is trusted. A signature proves *key possession*, nothing more. Signing is opt-in: an unsigned ledger has no record of authorship, so someone with write access can append an event and an "edit" confirming it, and plain `verify` won't notice.
 
 ### Limits on untrusted files
 
@@ -109,7 +138,7 @@ python -m pytest
 
 ## Limits
 
-Findings describe what is missing from the *collected record*, not what happened inside the institution. Text extraction is pattern-based, so review each event. This is not legal advice.
+Findings describe what is missing from the *collected record*, not what happened inside the institution. Text extraction is pattern-based, so review each event. Extracted labels, such as which mail system bounced a message, can be spoofed by whoever wrote the document. That's why they stay *unconfirmed* until you check them. This is not legal advice.
 
 ## License
 

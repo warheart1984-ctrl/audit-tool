@@ -112,8 +112,9 @@ def render_markdown(case: Case) -> str:
                 block.append(f"{label}: {val}")
         lines += _fenced(block)
         for art in ev.artifacts:
-            lines.append(f"- Artifact {_md(art.get('original_name'))} → {_md(art.get('stored_path'))}, "
-                         f"{_md(art.get('size'))} bytes, SHA-256 {_md(art.get('sha256'))}")
+            lines.append(f"- Artifact {_md(art.get('original_name'))} (name as supplied) → "
+                         f"{_md(art.get('stored_path'))}, {_md(art.get('size'))} bytes, "
+                         f"SHA-256 {_md(art.get('sha256'))}")
         lines.append("")
 
     lines += ["## Integrity", ""]

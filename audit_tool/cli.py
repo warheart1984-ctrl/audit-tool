@@ -3,15 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import os
+import secrets
 import sys
 from pathlib import Path
 
 from .extract import extract
 from .ingest import ingest_file
-from .models import EDITABLE, SOURCE_TYPES, Event, validate_field
+from .ledger import key_fingerprint
+from .models import EDITABLE, SOURCE_TYPES, validate_field
 from .report import LEDGER_FIELDS, render_json, render_markdown
 from .rules import audit, flag
 from .store import Case, Workspace, sha256_file
+
+
+def _outside_root(path: Path, root: Path) -> None:
+    if path.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"keep the key outside the cases folder ({root}); anyone who can write "
+                         "the ledger could otherwise also read the key")
+
+
+def load_key(path: str | None, root: Path) -> bytes | None:
+    if not path:
+        return None
+    key_path = Path(path)
+    _outside_root(key_path, root)
+    try:
+        key = bytes.fromhex(key_path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"could not read key file {key_path}: {exc}") from None
+    if len(key) < 32:
+        raise ValueError(f"key file {key_path} holds {len(key)} bytes; need at least 32 (use `audit keygen`)")
+    return key
 
 
 def print_head(case: Case) -> None:
@@ -59,11 +82,11 @@ def cmd_ingest(ws: Workspace, a) -> None:
         if result.extracted and result.extracted.text.strip():
             linked.append(case.store_derived_text(artifact, result.extracted.text, result.extracted.method))
         for fields_ in result.events:
-            ev = Event.from_dict(dict(fields_, id=case.next_event_id()))
+            ev = case.add_new_event(fields_, *linked)
             if a.source:
+                # A person stated this, so it is recorded as a confirmation (an edit), not at creation.
+                case.update_event(ev.id, {"source": a.source}, "--source given at ingest")
                 ev.source = a.source
-                ev.origin["source"] = "confirmed"
-            case.add_event(ev, *linked)
             via = f" [{result.extracted.method}]" if result.extracted and result.extracted.method else ""
             print(f"{ev.id}  {ev.source_type:11} {ev.decision or '(no decision found)':28} "
                   f"{ev.status_code}  ← {path.name}{via}")
@@ -81,12 +104,17 @@ def cmd_extract(ws: Workspace, a) -> None:
 
 def cmd_add(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
-    ev = Event(id=case.next_event_id())
+    changes = {}
     for pair in a.set or []:
-        name, _, value = pair.partition("=")
-        setattr(ev, name.strip(), validate_field(name.strip(), value))
-        ev.origin[name.strip()] = "confirmed"
-    case.add_event(ev)
+        name, sep, value = pair.partition("=")
+        if not sep:
+            raise ValueError(f"Expected field=value, got '{pair}'")
+        changes[name.strip()] = validate_field(name.strip(), value)
+    with case.ledger.locked():
+        ev = case.add_new_event({})
+        # Facts typed by a person are confirmations, which only edits can record.
+        if changes:
+            case.update_event(ev.id, changes, "entered by hand with `audit add`")
     print(f"Added {ev.id}")
     print_head(case)
 
@@ -147,13 +175,40 @@ def cmd_verify(ws: Workspace, a) -> None:
           "evidence folder holds only recorded files.")
     if a.expect:
         print(f"OK: anchored head {a.expect} is in the ledger; history up to it is unchanged.")
+        after = case.entries_after(a.expect)
+        if after:
+            print(f"Note: {after} entr{'y was' if after == 1 else 'ies were'} added after that head and "
+                  "are NOT covered by it. Review them, then save the new head.")
     else:
         print("Note: without --expect, this can't rule out the whole ledger having been replaced.")
+    if case.ledger.key:
+        prefix = case.ledger.unsigned_prefix()
+        print(f"OK: every entry from #{prefix + 1} on is signed with key {key_fingerprint(case.ledger.key)}."
+              + (f" Entries 1-{prefix} predate signing." if prefix else ""))
+    elif any("sig" in e for e in case.ledger.entries()):
+        print("Note: entries are signed; pass --key-file to check the signatures.")
+    else:
+        print("Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`).")
     print(f"Ledger head: {case.ledger.head()}")
 
 
 def cmd_head(ws: Workspace, a) -> None:
     print(ws.open_case(a.case).ledger.head())
+
+
+def cmd_keygen(ws: Workspace, a) -> None:
+    path = Path(a.path)
+    _outside_root(path, ws.root)
+    if path.exists():
+        raise FileExistsError(f"{path} already exists; not overwriting a key")
+    key = secrets.token_bytes(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(key.hex() + "\n")
+    print(f"Wrote signing key {key_fingerprint(key)} to {path}")
+    print("Pass it with --key-file (or set AUDIT_KEY_FILE). Keep it off shared drives and out of git;")
+    print("anyone holding it can sign entries as you.")
 
 
 def cmd_report(ws: Workspace, a) -> None:
@@ -169,7 +224,16 @@ def cmd_report(ws: Workspace, a) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="audit", description="Build evidence-based case files for automated decisions.")
     p.add_argument("--root", default="cases", help="workspace folder holding cases (default: ./cases)")
+    p.add_argument("--key-file", default=os.environ.get("AUDIT_KEY_FILE"),
+                   help="signing key (outside the cases folder); signs new entries and checks signatures. "
+                        "Default: $AUDIT_KEY_FILE")
+    p.add_argument("--actor", default=os.environ.get("AUDIT_ACTOR"),
+                   help="name recorded as the author of new entries. Default: $AUDIT_ACTOR")
     sub = p.add_subparsers(dest="command", required=True)
+
+    s = sub.add_parser("keygen", help="create a signing key file")
+    s.add_argument("path")
+    s.set_defaults(func=cmd_keygen)
 
     s = sub.add_parser("new", help="create a case")
     s.add_argument("case")
@@ -244,7 +308,9 @@ def main(argv: list[str] | None = None) -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     try:
-        args.func(Workspace(Path(args.root)), args)
-    except (ValueError, KeyError, FileNotFoundError, FileExistsError) as exc:
+        root = Path(args.root)
+        key = None if args.command == "keygen" else load_key(args.key_file, root)
+        args.func(Workspace(root, key=key, actor=args.actor), args)
+    except (ValueError, KeyError, FileNotFoundError, FileExistsError, TimeoutError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
