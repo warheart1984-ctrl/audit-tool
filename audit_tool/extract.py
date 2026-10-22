@@ -11,6 +11,8 @@ and their facts are entered by hand with `audit edit`.
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +25,9 @@ PDF_RENDER_DPI = 300
 MAX_PDF_PAGES = 500  # pages whose text layer is read
 MAX_OCR_PAGES = 25  # scanned pages rendered and OCR'd
 MAX_IMAGE_PIXELS = 50_000_000
+EXTRACT_TIMEOUT = 300.0  # seconds for one file in the isolated extractor
+# Never handed to the extraction process.
+SENSITIVE_ENV = ("AUDIT_KEY_FILE",)
 
 
 @dataclass
@@ -160,6 +165,56 @@ def extract_pdf(path: Path) -> ExtractedText:
     out.method = "+".join(sorted(methods)) or "none"
     out.confidence = mean(confs) if confs else None
     return out
+
+
+def _extract_child(path: str, conn) -> None:
+    try:
+        conn.send(extract(Path(path)))
+    except BaseException as exc:  # report, never hang the parent
+        conn.send(ExtractedText(warnings=[f"extraction failed: {exc}"]))
+    finally:
+        conn.close()
+
+
+def run_isolated(target, args: tuple, timeout: float):
+    """Run `target(*args, conn)` in a fresh process and return what it sends, or raise RuntimeError.
+
+    Image and PDF decoders are large native code fed with files the audited
+    party wrote. Running them in a spawned child means a decoder bug can't
+    read the signing key from this process's memory, a crash or hang can't take
+    the tool down with it, and the run is bounded by `timeout`. The child still
+    runs as the same OS user; real sandboxing needs OS-level isolation.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    hidden = {k: os.environ.pop(k) for k in SENSITIVE_ENV if k in os.environ}
+    try:
+        proc = ctx.Process(target=target, args=(*args, sender), daemon=True)
+        proc.start()
+    finally:
+        os.environ.update(hidden)
+    sender.close()
+    try:
+        if not receiver.poll(timeout):
+            raise RuntimeError(f"timed out after {timeout:.0f}s")
+        return receiver.recv()
+    except EOFError:
+        proc.join(5)
+        raise RuntimeError(f"extraction process crashed (exit code {proc.exitcode})") from None
+    finally:
+        receiver.close()
+        proc.join(2)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(2)
+
+
+def extract_isolated(path: Path, timeout: float | None = None) -> ExtractedText:
+    """`extract()` in a separate process with a time limit (see `run_isolated`)."""
+    try:
+        return run_isolated(_extract_child, (str(path),), timeout or EXTRACT_TIMEOUT)
+    except RuntimeError as exc:
+        return ExtractedText(warnings=[f"text extraction stopped: {exc}"])
 
 
 def extract(path: Path) -> ExtractedText:

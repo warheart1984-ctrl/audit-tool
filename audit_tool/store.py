@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 import shutil
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-from .ledger import Ledger, now_iso
+from .ledger import Ledger, now_iso, parse_anchor, public_pem
 from .models import EDITABLE, Artifact, Event
+from .secure import make_private_dir, private_file_mode
 
 _STR_FIELDS = {f.name for f in dataclass_fields(Event) if f.type == "str"}
 EVENT_ID = re.compile(r"EVT-\d{1,9}")
@@ -51,11 +53,25 @@ def _artifact_problem(a) -> str | None:
     return None
 
 
+PUBLIC_KEY_FILE = "signing-key.pub"
+
+
 class Case:
-    def __init__(self, directory: Path, key: bytes | None = None, actor: str | None = None):
+    def __init__(self, directory: Path, signer=None, verify_key=None, actor: str | None = None):
         self.dir = directory
-        self.ledger = Ledger(directory / "ledger.jsonl", key=key, actor=actor)
+        self.ledger = Ledger(directory / "ledger.jsonl", signer=signer, verify_key=verify_key, actor=actor)
         self.evidence_dir = directory / "evidence"
+
+    def publish_public_key(self) -> None:
+        """Ship the signer's public key with the case so others can check signatures.
+
+        The copy in the folder could be swapped by whoever can write here, so its
+        key id must also be saved off this machine and compared when verifying.
+        """
+        path = self.dir / PUBLIC_KEY_FILE
+        if self.ledger.signer and not path.exists():
+            path.write_bytes(public_pem(self.ledger.verify_key))
+            private_file_mode(path)
 
     @property
     def id(self) -> str:
@@ -127,9 +143,22 @@ class Case:
                     else:
                         setattr(ev, name, value)
                         ev.origin[name] = "confirmed"
+            elif kind == "artifact.record":
+                if not isinstance(p, dict) or (bad := _artifact_problem(p.get("artifact"))):
+                    problems.append(f"entry {seq}: artifact.record ignored "
+                                    f"({'payload is not an object' if not isinstance(p, dict) else bad})")
             else:
                 problems.append(f"entry {seq}: unknown entry kind '{kind}' (ignored)")
         return events, problems
+
+    def records(self) -> list[dict]:
+        """Files kept as evidence without an event (e.g. checked, nothing adverse found)."""
+        out = []
+        for entry in self.ledger.entries():
+            p = entry.get("payload")
+            if entry.get("kind") == "artifact.record" and isinstance(p, dict) and not _artifact_problem(p.get("artifact")):
+                out.append(p)
+        return out
 
     def events(self) -> dict[str, Event]:
         return self.replay()[0]
@@ -146,27 +175,65 @@ class Case:
                     highest = max(highest, int(m.group(1)))
         return f"EVT-{highest + 1:04d}"
 
+    def _evidence_folder(self) -> Path:
+        """The evidence folder, created owner-only, refusing links or junctions that redirect writes."""
+        expected = self.dir.resolve() / "evidence"
+        if self.evidence_dir.is_symlink() or (self.evidence_dir.exists() and self.evidence_dir.resolve() != expected):
+            raise ValueError(f"{self.evidence_dir} is a link or junction to another location; "
+                             "refusing to write evidence there")
+        make_private_dir(self.evidence_dir)
+        return self.evidence_dir
+
+    def _write_new(self, dest: Path, write) -> None:
+        """Create `dest` exclusively (never following an existing link) and fill it with `write(fh)`."""
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                write(fh)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+
+    def _existing_ok(self, dest: Path, digest: str) -> bool:
+        if dest.is_symlink() or (dest.exists() and not dest.is_file()):
+            raise ValueError(f"{dest} exists but is not a regular file; refusing to use it")
+        if not dest.exists():
+            return False
+        if sha256_file(dest) != digest:
+            raise ValueError(f"{dest} already exists with different content; run `audit verify`")
+        return True
+
     def store_artifact(self, src: Path) -> dict:
         """Copy a file into the evidence folder (idempotent by content hash)."""
         digest = sha256_file(src)
-        self.evidence_dir.mkdir(parents=True, exist_ok=True)
+        folder = self._evidence_folder()
         safe = re.sub(r"[^A-Za-z0-9._-]+", "_", src.name)
-        dest = self.evidence_dir / f"{digest[:12]}_{safe}"
-        if not dest.exists():
-            shutil.copy2(src, dest)
+        dest = folder / f"{digest[:12]}_{safe}"
+        if not self._existing_ok(dest, digest):
+            with src.open("rb") as fh_in:
+                self._write_new(dest, lambda out: shutil.copyfileobj(fh_in, out, 1 << 20))
+            if sha256_file(dest) != digest:
+                dest.unlink()
+                raise ValueError(f"{src} changed while it was being copied; try again")
         return Artifact(
             sha256=digest,
             stored_path=dest.relative_to(self.dir).as_posix(),
             original_name=src.name,
-            size=src.stat().st_size,
+            size=dest.stat().st_size,
             added_at=now_iso(),
         ).__dict__
+
+    def record_artifact(self, artifact: dict, note: str) -> None:
+        """Keep a file on record without an event, e.g. a statement checked and found clean."""
+        self.ledger.append("artifact.record", {"artifact": artifact, "note": note})
 
     def store_derived_text(self, source: dict, text: str, method: str) -> dict:
         """Save text recovered from an artifact (OCR, PDF text layer) next to the original."""
         stem = Path(source["stored_path"]).name
-        dest = self.evidence_dir / f"{stem}.extracted.txt"
-        dest.write_text(text, encoding="utf-8", newline="\n")
+        dest = self._evidence_folder() / f"{stem}.extracted.txt"
+        data = text.encode("utf-8")
+        if not self._existing_ok(dest, hashlib.sha256(data).hexdigest()):
+            self._write_new(dest, lambda out: out.write(data))
         artifact = Artifact(
             sha256=sha256_file(dest),
             stored_path=dest.relative_to(self.dir).as_posix(),
@@ -206,44 +273,56 @@ class Case:
         return artifact
 
     def entries_after(self, anchor: str) -> int | None:
-        """How many entries were appended after an anchored head (None if it isn't in the ledger)."""
+        """How many entries were appended after an anchor (None if it isn't where it says)."""
         pos = self.ledger.position(anchor)
         return None if pos is None else len(self.ledger.entries(fresh=True)) - pos
 
-    def verify(self, expect_head: str | None = None) -> list[str]:
+    def verify(self, expect_head: str | None = None, exact: bool = False) -> list[str]:
         """Check the ledger chain (and signatures, with a key), every recorded evidence file,
         and the evidence folder.
 
-        `expect_head` is a head hash saved earlier (see `Ledger.head`). The chain
-        alone can't detect a wholesale rewrite; a hash kept somewhere else can.
+        `expect_head` is an anchor saved earlier ("<seq>:<hash>", see `Ledger.anchor`;
+        a bare hash is accepted). The chain alone can't detect a wholesale rewrite;
+        an anchor kept somewhere else can. With `exact`, the anchor must also be the
+        newest entry, which catches entries deleted from (or added to) the end.
         """
         problems = self.ledger.verify()
         if problems and problems[0].startswith("line "):
             return problems  # unreadable ledger: nothing below can be trusted
         if expect_head:
-            if not self.ledger.contains(expect_head):
-                problems.append(f"anchored head {expect_head} is not in this ledger: "
-                                "history recorded before it was rewritten or replaced")
+            after = self.entries_after(expect_head)
+            if after is None:
+                problems.append(f"anchor {expect_head} is not in this ledger at its recorded position: "
+                                "history up to it was rewritten, truncated or replaced")
+            elif exact and after:
+                problems.append(f"{after} entr{'y' if after == 1 else 'ies'} after the anchor {expect_head}; "
+                                "--exact requires the anchor to be the newest entry")
+            elif exact and parse_anchor(expect_head)[0] is None:
+                problems.append("--exact needs an anchor with its sequence number (<seq>:<hash>)")
         events, replay_problems = self.replay()
         problems += replay_problems
 
         case_root = self.dir.resolve()
         recorded = set()
-        for ev in events.values():
-            for art in ev.artifacts:
-                rel = art["stored_path"]
-                if rel in recorded:
-                    continue
-                recorded.add(rel)
-                path = self.dir / rel
-                if not path.resolve().is_relative_to(case_root) or not rel.startswith("evidence/"):
-                    problems.append(f"{rel}: recorded evidence path points outside the evidence folder")
-                elif path.is_symlink():
-                    problems.append(f"{rel}: evidence file is a symbolic link")
-                elif not path.is_file():
-                    problems.append(f"{rel}: evidence file is missing")
-                elif sha256_file(path) != art["sha256"]:
-                    problems.append(f"{rel}: evidence file changed since it was recorded")
+        if self.evidence_dir.is_symlink() or (self.evidence_dir.exists()
+                                              and self.evidence_dir.resolve() != case_root / "evidence"):
+            problems.append("evidence: folder is a link or junction to another location")
+        artifacts = [art for ev in events.values() for art in ev.artifacts]
+        artifacts += [r["artifact"] for r in self.records()]
+        for art in artifacts:
+            rel = art["stored_path"]
+            if rel in recorded:
+                continue
+            recorded.add(rel)
+            path = self.dir / rel
+            if not path.resolve().is_relative_to(case_root) or not rel.startswith("evidence/"):
+                problems.append(f"{rel}: recorded evidence path points outside the evidence folder")
+            elif path.is_symlink():
+                problems.append(f"{rel}: evidence file is a symbolic link")
+            elif not path.is_file():
+                problems.append(f"{rel}: evidence file is missing")
+            elif sha256_file(path) != art["sha256"]:
+                problems.append(f"{rel}: evidence file changed since it was recorded")
 
         # An evidence folder should hold exactly what the ledger lists.
         if self.evidence_dir.exists():
@@ -268,13 +347,16 @@ def valid_case_id(case_id: str) -> bool:
 
 
 class Workspace:
-    def __init__(self, root: Path, key: bytes | None = None, actor: str | None = None):
+    def __init__(self, root: Path, signer=None, verify_key=None, actor: str | None = None):
         self.root = root
-        self.key = key
+        self.signer = signer
+        self.verify_key = verify_key
         self.actor = actor
 
     def _case(self, directory: Path) -> Case:
-        return Case(directory, key=self.key, actor=self.actor)
+        case = Case(directory, signer=self.signer, verify_key=self.verify_key, actor=self.actor)
+        case.publish_public_key()
+        return case
 
     def _case_dir(self, case_id: str) -> Path:
         """Map a case id to its folder, refusing anything that could leave the workspace or alias another case."""
@@ -292,7 +374,8 @@ class Workspace:
         directory = self._case_dir(case_id)
         if (directory / "ledger.jsonl").exists():
             raise FileExistsError(f"Case {case_id} already exists at {directory}")
-        directory.mkdir(parents=True, exist_ok=True)
+        make_private_dir(self.root)
+        make_private_dir(directory)
         case = self._case(directory)
         case.ledger.append("case.create", {
             "id": case_id, "title": title, "subject": subject,

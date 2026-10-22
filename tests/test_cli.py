@@ -13,25 +13,29 @@ def test_cli_rejects_traversal_case_id(cli, tmp_path):
     assert not (tmp_path / "ledger.jsonl").exists()
 
 
-def test_file_with_no_adverse_decisions_is_not_left_in_evidence(cli, tmp_path):
+def test_file_with_no_adverse_decisions_is_kept_on_record(cli, tmp_path):
+    # It used to be discarded; the hash of a file that was checked and found clean is evidence too.
     cli("new", "c", "--title", "t")
     f = tmp_path / "ok.csv"
     f.write_text("Date,Status\n2026-01-01,Posted\n")
     code, out = cli("ingest", "c", str(f))
-    assert code == 0 and "not stored" in out
-    assert not (tmp_path / "cases" / "c" / "evidence").exists()
+    assert code == 0 and "kept on record" in out
+    stored = list((tmp_path / "cases" / "c" / "evidence").iterdir())
+    assert len(stored) == 1 and stored[0].name.endswith("ok.csv")
     code, out = cli("verify", "c")
     assert code == 0, out
+    code, out = cli("report", "c")
+    assert "Files checked with no adverse decisions" in out and "No adverse decisions found" in out
 
 
 def test_mutations_print_head_and_verify_expect_catches_rewrite(cli, tmp_path):
     code, out = cli("new", "c", "--title", "t")
-    head = re.search(r"Ledger head: ([0-9a-f]{64})", out).group(1)
+    head = re.search(r"Ledger anchor: (\d+:[0-9a-f]{64})", out).group(1)
     code, out = cli("head", "c")
     assert out.strip() == head
 
     code, out = cli("verify", "c", "--expect", head)
-    assert code == 0 and "anchored head" in out
+    assert code == 0 and "is in the ledger at its position" in out
 
     ledger = tmp_path / "cases" / "c" / "ledger.jsonl"
     ledger.unlink()
@@ -49,4 +53,5 @@ def test_verify_reports_bad_reference_instead_of_crashing(cli, tmp_path):
     code, out = cli("verify", "c")
     assert code == 2 and "unknown event EVT-0099" in out
     code, out = cli("report", "c")
-    assert code == 0 and "unknown event EVT-0099" in out
+    # The report still renders, marked unreliable, and the exit code says integrity failed.
+    assert code == 2 and "unknown event EVT-0099" in out and "INTEGRITY FAILED" in out

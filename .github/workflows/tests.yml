@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install
-        run: python -m pip install ".[ocr,dev]"
+        run: python -m pip install ".[ocr,sign,dev]"
       - name: Test
         # -rs lists skipped tests (the symlink test is skipped where symlinks aren't allowed).
         run: python -m pytest -rs

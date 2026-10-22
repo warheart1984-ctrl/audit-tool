@@ -5,24 +5,24 @@ hash covers its content and the previous entry's hash. Editing or deleting any
 past line breaks the chain, which `verify()` reports. Current state is rebuilt by
 replaying the entries, so the full history of who-changed-what stays on record.
 
-What the chain can't show on its own, and the two defences:
+What the chain can't show on its own, and the defences:
 
 * Someone with write access can replace the whole file with a new, internally
-  consistent chain, or append entries after a point you trusted. The head hash
-  (`head()`) saved somewhere off this machine proves the history *up to it* is
-  unchanged (`contains()`); entries after it are not covered until you save a
-  newer head.
-* Nothing in a bare entry says who wrote it. With a key (kept outside the cases
-  folder), each entry records an `actor` and an HMAC-SHA256 `sig` over its hash,
-  and `verify()` flags unsigned or wrongly signed entries. This stops other
-  people and processes that can write the file but don't hold the key. It does
-  not stop whoever holds the key.
+  consistent chain, or append or delete entries after a point you trusted. An
+  anchor (`anchor()`, "<seq>:<hash>") saved off this machine proves the history
+  up to that entry is unchanged and still at that position. `exact=True` also
+  proves nothing was added or removed after it, so save a new anchor whenever
+  you finish working on a case.
+* Nothing in a bare entry says who wrote it. With an Ed25519 private key (kept
+  outside the cases folder), each entry records an `actor`, the key id `kid` and
+  a signature over its hash. Anyone holding only the public key can check the
+  signatures but cannot forge new ones, so the public key can be handed to the
+  other side. Whoever holds the private key is trusted.
 """
 
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import time
@@ -32,7 +32,7 @@ from pathlib import Path
 
 GENESIS = "0" * 64
 REQUIRED_KEYS = {"seq", "ts", "kind", "payload", "prev", "hash"}
-OPTIONAL_KEYS = {"actor", "sig"}
+OPTIONAL_KEYS = {"actor", "kid", "sig"}
 LOCK_TIMEOUT = 15.0  # seconds to wait for another writer
 STALE_LOCK = 60.0  # a lock older than this was left by a crashed writer
 
@@ -43,25 +43,90 @@ def now_iso() -> str:
 
 def _entry_hash(entry: dict) -> str:
     body = {k: entry[k] for k in ("seq", "ts", "kind", "payload", "prev")}
-    if "actor" in entry:
-        body["actor"] = entry["actor"]  # the author is part of what the hash commits to
+    for k in ("actor", "kid"):  # who wrote it and with which key are part of what's committed to
+        if k in entry:
+            body[k] = entry[k]
     raw = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def sign(key: bytes, digest: str) -> str:
-    return hmac.new(key, digest.encode("ascii"), hashlib.sha256).hexdigest()
+# --- Keys ---------------------------------------------------------------------
+
+def _crypto():
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+    except ImportError:
+        raise ValueError('signing needs the "cryptography" package: pip install ".[sign]"') from None
+    return serialization, ed25519
 
 
-def key_fingerprint(key: bytes) -> str:
-    return hashlib.sha256(b"audit-tool key id:" + key).hexdigest()[:12]
+def public_bytes(public_key) -> bytes:
+    serialization, _ = _crypto()
+    return public_key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+
+def key_id(public_key) -> str:
+    """Short fingerprint of a public key. Save it off this machine with your anchors."""
+    return hashlib.sha256(public_bytes(public_key)).hexdigest()[:16]
+
+
+def generate_keypair() -> tuple[bytes, bytes]:
+    """New Ed25519 key pair as (private PEM, public PEM)."""
+    serialization, ed25519 = _crypto()
+    private = ed25519.Ed25519PrivateKey.generate()
+    priv_pem = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                     serialization.NoEncryption())
+    pub_pem = private.public_key().public_bytes(serialization.Encoding.PEM,
+                                                serialization.PublicFormat.SubjectPublicKeyInfo)
+    return priv_pem, pub_pem
+
+
+def load_private_key(path: Path):
+    serialization, ed25519 = _crypto()
+    try:
+        key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"could not read private key {path}: {exc}") from None
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise ValueError(f"{path} is not an Ed25519 private key (create one with `audit keygen`)")
+    return key
+
+
+def load_public_key(path: Path):
+    serialization, ed25519 = _crypto()
+    try:
+        key = serialization.load_pem_public_key(path.read_bytes())
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"could not read public key {path}: {exc}") from None
+    if not isinstance(key, ed25519.Ed25519PublicKey):
+        raise ValueError(f"{path} is not an Ed25519 public key")
+    return key
+
+
+def public_pem(public_key) -> bytes:
+    serialization, _ = _crypto()
+    return public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+
+
+def parse_anchor(text: str) -> tuple[int | None, str]:
+    """'<seq>:<hash>' or a bare hash -> (seq or None, lower-case hash)."""
+    text = text.strip().lower()
+    if ":" in text:
+        seq, _, digest = text.partition(":")
+        if not seq.isdigit():
+            raise ValueError(f"anchor '{text}' should look like <seq>:<hash>")
+        return int(seq), digest
+    return None, text
 
 
 class Ledger:
-    def __init__(self, path: Path, key: bytes | None = None, actor: str | None = None):
+    def __init__(self, path: Path, signer=None, verify_key=None, actor: str | None = None):
         self.path = path
-        self.key = key
-        self.actor = actor or (f"key:{key_fingerprint(key)}" if key else None)
+        self.signer = signer
+        self.verify_key = verify_key or (signer.public_key() if signer else None)
+        self.kid = key_id(self.verify_key) if self.verify_key else None
+        self.actor = actor or (f"key:{self.kid}" if signer else None)
         self._cache: tuple[tuple[int, int], list[dict]] | None = None
         self._lock_depth = 0
 
@@ -114,7 +179,7 @@ class Ledger:
         deadline = time.monotonic() + LOCK_TIMEOUT
         while True:
             try:
-                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 break
             except (FileExistsError, PermissionError):
                 try:
@@ -144,32 +209,44 @@ class Ledger:
             entry = {"seq": len(existing) + 1, "ts": now_iso(), "kind": kind, "payload": payload, "prev": prev}
             if self.actor:
                 entry["actor"] = self.actor
+            if self.signer:
+                entry["kid"] = self.kid
             entry["hash"] = _entry_hash(entry)
-            if self.key:
-                entry["sig"] = sign(self.key, entry["hash"])
-            with self.path.open("a", encoding="utf-8", newline="\n") as fh:
+            if self.signer:
+                entry["sig"] = self.signer.sign(entry["hash"].encode("ascii")).hex()
+            # Created owner-only; the ledger describes private matters.
+            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8", newline="\n") as fh:
                 fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
         return entry
 
     def head(self) -> str:
-        """Hash of the latest entry. Saved elsewhere, it anchors everything up to it."""
+        """Hash of the latest entry."""
         entries = self.entries()
         return entries[-1]["hash"] if entries else GENESIS
 
-    def position(self, digest: str) -> int | None:
-        """1-based position of the entry with this hash, or None."""
-        digest = digest.strip().lower()
+    def anchor(self) -> str:
+        """'<seq>:<hash>' of the latest entry. Save it off this machine."""
+        entries = self.entries()
+        return f"{len(entries)}:{entries[-1]['hash']}" if entries else f"0:{GENESIS}"
+
+    def position(self, anchor: str) -> int | None:
+        """1-based position of the anchored entry, or None if it isn't where the anchor says."""
+        seq, digest = parse_anchor(anchor)
         if len(digest) != 64:
             return None
-        for i, e in enumerate(self.entries(fresh=True), start=1):
+        entries = self.entries(fresh=True)
+        if seq is not None:
+            return seq if 1 <= seq <= len(entries) and entries[seq - 1].get("hash") == digest else None
+        for i, e in enumerate(entries, start=1):
             if e.get("hash") == digest:
                 return i
         return None
 
-    def contains(self, digest: str) -> bool:
-        return self.position(digest) is not None
+    def contains(self, anchor: str) -> bool:
+        return self.position(anchor) is not None
 
     def verify(self) -> list[str]:
         try:
@@ -197,7 +274,7 @@ class Ledger:
             if not intact:
                 problems.append(f"entry {i}: content does not match its hash (modified after recording)")
             prev = entry.get("hash")
-        if self.key:
+        if self.verify_key is not None:
             problems += self._verify_signatures(entries)
         return problems
 
@@ -210,7 +287,12 @@ class Ledger:
             n += 1
         return n
 
+    def is_signed(self) -> bool:
+        return any("sig" in e for e in self.entries())
+
     def _verify_signatures(self, entries: list[dict]) -> list[str]:
+        from cryptography.exceptions import InvalidSignature
+
         problems = []
         signing_started = False
         for i, entry in enumerate(entries, start=1):
@@ -221,8 +303,13 @@ class Ledger:
                     problems.append(f"entry {i}: unsigned entry after signing began (written without the key)")
                 continue
             signing_started = True
-            if not isinstance(sig, str) or not hmac.compare_digest(sig, sign(self.key, str(entry.get("hash")))):
-                problems.append(f"entry {i}: signature does not match this key (forged, or signed with another key)")
+            if entry.get("kid") != self.kid:
+                problems.append(f"entry {i}: signed by another key (kid {entry.get('kid')}, expected {self.kid})")
+                continue
+            try:
+                self.verify_key.verify(bytes.fromhex(str(sig)), str(entry.get("hash")).encode("ascii"))
+            except (InvalidSignature, ValueError):
+                problems.append(f"entry {i}: signature is invalid (forged or altered)")
         if entries and not signing_started:
             problems.append("no entry is signed with this key")
         return problems

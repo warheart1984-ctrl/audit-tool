@@ -50,6 +50,6 @@ def test_newlines_and_pipes_cannot_add_table_rows_or_headings(ws):
 
 def test_report_states_the_integrity_guarantee_accurately(ws):
     md = _report(ws)
-    assert "Ledger head at the time of this report" in md
+    assert "Ledger anchor at the time of this report" in md
     assert "any later change to a recorded entry can be detected" not in md
     assert "only detected against a head hash saved somewhere else" in md

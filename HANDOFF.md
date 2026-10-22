@@ -22,12 +22,13 @@ ledger.jsonl ◄── store.py ◄──────────┘   append-on
 |---|---|
 | `models.py` | `Event` fields, editable-field allowlist, value validation |
 | `ingest.py` | Detects the file type, then extracts facts with regexes: SMTP codes, decision words, reasons, policies, appeal language, labelled fields such as `Sender Address:`, dates |
-| `extract.py` | Text from images (RapidOCR, with Tesseract as fallback) and PDFs (text layer first, then OCR for scanned pages) |
-| `ledger.py` | Hash chain, head anchors, HMAC signing, append lock, parse cache |
-| `store.py` | Case folders, evidence copies, replay of the ledger into current state, `verify()` |
+| `extract.py` | Text from images (RapidOCR, with Tesseract as fallback) and PDFs (text layer first, then OCR for scanned pages), run in an isolated child process with a time limit |
+| `ledger.py` | Hash chain, `seq:hash` anchors, Ed25519 signing, append lock, parse cache |
+| `store.py` | Case folders, evidence copies (never through links), replay of the ledger into current state, `verify()` |
+| `secure.py` | Owner-only permissions: `0700`/`0600` on Linux and macOS, owner-only ACLs on Windows |
 | `rules.py` | The auditor questions. Only **confirmed** values clear a finding |
 | `report.py` | Renders the case file. All evidence text is escaped |
-| `cli.py` | `audit new / ingest / extract / show / edit / add / attach / check / verify / head / keygen / report / list` |
+| `cli.py` | `audit new / ingest / extract / show / edit / add / attach / check / verify / head / keygen / secure / report / list` |
 
 The trust model is the design's core, so keep it intact:
 
@@ -38,35 +39,42 @@ The trust model is the design's core, so keep it intact:
 
 ## What's been hardened
 
-Two outside security reviews were done. Every confirmed finding was fixed with regression tests.
+Three outside security reviews were done. Every confirmed finding was fixed with regression tests.
 
 - **Workspace confinement:** case IDs are confined to `cases/`. They reject traversal and absolute paths, a trailing `.`, and Windows device names.
 - **Ledger integrity:**
   - Edits, deletions, unreadable lines and fields outside the hash are all detected.
-  - `verify --expect <head>` detects a full ledger rewrite and counts the entries added after the saved head.
-  - With a key, entries carry an author and an HMAC signature, so appends made without the key are flagged.
+  - `verify --expect <seq>:<hash>` detects a full ledger rewrite and counts the entries added after the anchor. With `--exact`, deletions from the end are caught too.
+  - With an Ed25519 key, entries carry an author, a key id and a signature. Appends made without the key are flagged. The public key verifies but can't forge, so it can be handed to the other side.
   - Confirmation can't be claimed when an event is created, only through an edit.
 - **Replay:** malformed or orphaned entries are skipped and reported, never crashed on. IDs are never reused.
 - **Concurrency:** a lock file around appends. Without it, Windows lost about 8% of entries under 4 parallel writers.
 - **Evidence folder:** must match the ledger exactly. Unlisted files, symlinks and recorded paths that escape the folder are all flagged.
+- **Read commands fail closed:** `check` and `show` refuse to run on a ledger that doesn't verify. `report` marks the report unreliable and exits 2.
 - **Reports:** a document can't inject headings, links or fake findings.
-- **Untrusted files:** caps on text size, CSV rows, PDF pages, OCR pages and image pixels. CSV delimiters are detected automatically, and a missing status column gives a warning.
+- **Case data on disk:** owner-only permissions. `audit secure <case>` tightens older cases. No in-tool encryption; use full-disk encryption.
+- **Untrusted files:**
+  - Size limits on every parsed file type, plus caps on CSV rows, PDF pages, OCR pages and image pixels.
+  - PDF and image decoding runs in a separate process with a time limit, away from the signing key.
+  - Malformed CSV rows and a missing status column give warnings, and every warning is saved with the event.
+  - A file with no adverse rows is kept on record.
 - **Extraction can't clear findings:** a letter written to hit every pattern ("manually reviewed", "appeal to the ombudsman") still produces findings.
-- **Dependencies:** optional dependencies pinned to versions with known security fixes.
+- **Dependencies:** minimum versions at known security fixes (Pillow 13, pypdf 6) and no upper limits, so security releases are never blocked.
 
 ## Known limits (by design, documented)
 
 - **Signing is opt-in.** An unsigned ledger has no record of authorship. Someone with write access can append an event plus an edit confirming it.
-- **A saved head only proves the history up to it.** Deletions from the end of the ledger after it can't be detected, so re-anchor after each session.
-- **The key holder is trusted.** A signature proves possession of the key, nothing more.
+- **An anchor only covers what existed when it was saved.** `--exact` catches later additions and deletions, but only against the newest anchor you hold, so save a new one after each session.
+- **The private-key holder is trusted.** A signature proves possession of the key, nothing more. The `signing-key.pub` copy in a case folder is only as good as the key id the owner shared separately.
+- **Isolation isn't a sandbox.** The extraction process runs as the same OS user.
 - **Extraction is pattern-based** and tuned on Microsoft 365 bounces and simple letters. OCR on phone screenshots drops spaces, so the parser tolerates that, but confirmation is still required.
 - **Slash dates** are read month/day, and bounce timestamps carry no time zone.
 
 ## Running it
 
 ```bash
-pip install -e ".[ocr,dev]"
-python -m pytest                     # 97 tests; the symlink test skips where symlinks aren't allowed
+pip install -e ".[ocr,sign,dev]"
+python -m pytest                     # 119 tests; POSIX-only tests skip on Windows and run in CI
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 
@@ -75,7 +83,7 @@ CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Pyth
 ## House rules
 
 - **Never commit real evidence.** `cases/` and image, PDF and `.eml` files in the repo root are git-ignored. The owner's real case files are kept locally and are not in this repo.
-- **Keep signing keys out of the repo.** `keygen` refuses to write a key inside `cases/`.
+- **Keep private keys out of the repo.** `keygen` refuses to write a key inside `cases/`.
 - **Every security fix needs a test** that fails on the old code.
 
 ## Reasonable next steps

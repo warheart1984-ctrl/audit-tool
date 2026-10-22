@@ -64,6 +64,10 @@ def render_markdown(case: Case) -> str:
         by_event.setdefault(f.event_id, []).append(f)
 
     lines = [f"# Case file: {_md(info.get('title', case.id))}", ""]
+    if problems:
+        lines += ["> **WARNING: INTEGRITY FAILED.** The ledger behind this report does not verify "
+                  f"({len(problems)} problem(s), listed under Integrity). Its contents may have been "
+                  "altered. Do not rely on this report.", ""]
     lines += [f"- **Case ID:** {_md(case.id)}"]
     if info.get("subject"):
         lines.append(f"- **Subject:** {_md(info['subject'])}")
@@ -117,6 +121,15 @@ def render_markdown(case: Case) -> str:
                          f"SHA-256 {_md(art.get('sha256'))}")
         lines.append("")
 
+    records = case.records()
+    if records:
+        lines += ["## Files checked with no adverse decisions", ""]
+        for r in records:
+            art = r["artifact"]
+            lines.append(f"- {_md(art.get('original_name'))} (name as supplied) → {_md(art.get('stored_path'))}, "
+                         f"SHA-256 {_md(art.get('sha256'))}: {_md(r.get('note'))}")
+        lines.append("")
+
     lines += ["## Integrity", ""]
     if problems:
         lines += [f"- {_md(p)}" for p in problems]
@@ -124,9 +137,9 @@ def render_markdown(case: Case) -> str:
         lines.append(f"All {len(case.ledger.entries())} ledger entries chain correctly, every "
                      "evidence file matches its recorded SHA-256 hash, and the evidence folder "
                      "holds no unrecorded files.")
-    lines += ["", f"Ledger head at the time of this report: `{case.ledger.head()}`. Anyone holding "
-              "an earlier head hash can confirm with `audit verify --expect <hash>` that the "
-              "history up to that point has not been rewritten."]
+    lines += ["", f"Ledger anchor at the time of this report: `{case.ledger.anchor()}`. Anyone holding "
+              "it can confirm with `audit verify --expect <anchor> --exact` that the ledger is still "
+              "exactly as it was when this report was made."]
     lines += ["", "## Method and limitations", "",
               "- Each finding describes what is **absent from the collected record**. It does not "
               "claim that something did not happen inside the institution.",
@@ -146,6 +159,8 @@ def render_json(case: Case) -> str:
         "case": case.info(),
         "generated": now_iso(),
         "integrity_problems": case.verify(),
+        "anchor": case.ledger.anchor(),
         "events": [dict(e.to_dict(), gate=flag(e)) for e in events.values()],
+        "records": case.records(),
         "findings": [f.__dict__ for f in audit(events)],
     }, indent=2, ensure_ascii=False)

@@ -72,69 +72,88 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
 
 ## Integrity
 
-- Evidence files are copied byte for byte into `cases/<id>/evidence/` and identified by SHA-256. A file is stored only when it produces an event to link it to.
+- Evidence files are copied byte for byte into `cases/<id>/evidence/` and identified by SHA-256. A file that produces no event, such as a statement with nothing adverse in it, is still stored and recorded as "checked, nothing adverse", with any ingest warnings. Warnings that limited an extraction are also saved with the event, not just printed.
 - `ledger.jsonl` is append-only and hash-chained. Corrections are added as new entries, so the history stays visible.
 - `verify` reports:
   - edited, deleted or unreadable ledger lines;
   - entries that refer to events that don't exist;
   - evidence files that changed or went missing;
   - files or symbolic links in `evidence/` that the ledger doesn't list;
+  - an `evidence/` folder that is itself a link or junction;
   - malformed entries, which are skipped and listed instead of crashing the tool;
   - fields on a ledger line that the hash doesn't cover, so nothing can ride along uncommitted;
   - "confirmed" claimed when an event is created. Only an edit (`audit edit`, with a reason) confirms a fact.
+- **Read commands fail closed.** `check` and `show` refuse to run on a ledger that doesn't verify unless you pass `--unverified`. `report` still writes the file, with a warning at the very top, and exits with code 2. `list` marks such cases INTEGRITY FAILED.
+- Evidence is written only into a real `evidence/` folder inside the case, never through a link or junction, and existing files are never overwritten or followed.
 - Appends take a lock file, so two processes writing to one case can't lose or interleave entries.
 - Case IDs must be plain names: letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit, with no `..` and no Windows device names such as `CON`. A case can never be read or written outside the `cases/` folder, and two IDs can't name the same folder.
-- Extraction runs on documents the audited party wrote, so extracted values are not trusted to clear findings: a document claiming "manually reviewed" or "appeal to the ombudsman" produces a *claimed, unconfirmed* finding instead of silence, and only a field confirmed by a person (`audit edit`) clears it or satisfies the PASS gate.
+- Extraction runs on documents the audited party wrote, so extracted values are not trusted to clear findings. A document claiming "manually reviewed" or "appeal to the ombudsman" produces a *claimed, unconfirmed* finding instead of silence. Only a field confirmed by a person (`audit edit`) clears a finding or satisfies the PASS gate.
 
-### What the hash chain does *not* prove
+### Anchors: proving the ledger wasn't rewritten
 
-Someone with write access to the case folder can replace the whole ledger with a new chain that is internally consistent, and plain `verify` can't tell. The defence is the **ledger head**, the hash of the latest entry:
+Someone with write access to the case folder can replace the whole ledger with a new chain that is internally consistent, and plain `verify` can't tell. The defence is an **anchor**, `<seq>:<hash>` of the latest entry, saved somewhere off this machine:
 
 ```bash
-python -m audit_tool head bank-2026                    # also printed after every change
-python -m audit_tool verify bank-2026 --expect <hash>  # fails if that hash is no longer in the ledger
+python -m audit_tool head bank-2026                               # also printed after every change
+python -m audit_tool verify bank-2026 --expect 12:3f9a...         # history up to entry 12 is unchanged
+python -m audit_tool verify bank-2026 --expect 12:3f9a... --exact # ...and nothing was added or removed after it
 ```
 
-Save the head somewhere off this machine after key steps. You could email it to yourself or to the other party, or include it in a complaint. Entries are only ever appended, so a saved head stays valid as the case grows. If the history before it is ever rewritten, `--expect` fails. Each report also prints the current head.
+You could email the anchor to yourself or to the other party, or include it in a complaint. Without `--exact`, `verify` also tells you how many entries were added after the anchor. Those entries aren't covered by it, so review them and save the new anchor. With `--exact`, any entry added *or deleted* after the anchor fails verification. That catches someone truncating the end of the ledger, provided the anchor you hold is the latest one. So save a new anchor whenever you finish working on a case. Each report prints the anchor it was made from.
 
-Two things an anchored head still does *not* prove:
+### Signing entries (Ed25519)
 
-- **Anything appended after it.** `verify --expect` says how many entries follow the anchor and that they are not covered by it — review them and save the new head. An anchor also can't notice entries *deleted* from the tail after it, so re-anchor after every session.
-- **Who wrote an entry.** For that, entries need signatures.
-
-### Signing entries
-
-Give the tool a signing key and every new entry records an `actor` and an HMAC-SHA256 `sig` over its hash:
+An anchor proves the history wasn't changed. It doesn't show *who* wrote an entry. For that, sign entries with an Ed25519 key pair (`pip install -e ".[sign]"`):
 
 ```bash
-python -m audit_tool keygen ~/audit-signing.key   # keep it OUTSIDE the cases folder and out of git
+python -m audit_tool keygen ~/audit-signing.key        # writes the private key and ~/audit-signing.key.pub
 python -m audit_tool --key-file ~/audit-signing.key --actor alex ingest bank-2026 letter.pdf
 python -m audit_tool --key-file ~/audit-signing.key verify bank-2026
+python -m audit_tool --public-key audit-signing.key.pub verify bank-2026   # what the other side runs
 ```
 
-Or set `AUDIT_KEY_FILE` and `AUDIT_ACTOR`. With a key, `verify` flags:
-- entries appended without the key after signing began;
-- entries signed by a different key;
-- a ledger with no signed entries at all.
+Or set `AUDIT_KEY_FILE`, `AUDIT_PUBLIC_KEY` and `AUDIT_ACTOR`. Each new entry records an `actor`, the key id `kid` and a signature over its hash. Both `actor` and `kid` are covered by the hash.
 
-Unsigned history from before signing began is allowed and reported as such. That also means stripping the signatures from the *earliest* entries isn't flagged. Their content stays protected, because the signed entries after them commit to it through the chain.
+- **Private key:** keep it outside the cases folder (`keygen` refuses otherwise) and out of git. It is written owner-only. Whoever holds it can sign as you.
+- **Public key:** give it to a bank, a regulator or opposing counsel. It lets them check every signature but **not** forge one, unlike a shared-secret scheme. The case also ships a copy in `signing-key.pub`, which `verify` uses when no key is given. Anyone who can write the folder could swap that copy, so the key id it prints has to match the one you gave them separately.
+- **What `verify` flags with a key:**
+  - entries appended without the key after signing began;
+  - entries signed by another key;
+  - altered signatures;
+  - a ledger with nothing signed.
+- **Unsigned history** from before signing began is allowed and reported as such.
 
-Whoever holds the key is trusted. A signature proves *key possession*, nothing more. Signing is opt-in: an unsigned ledger has no record of authorship, so someone with write access can append an event and an "edit" confirming it, and plain `verify` won't notice.
+Signing is opt-in. An unsigned ledger has no record of authorship, so someone with write access can append an event and an "edit" confirming it, and plain `verify` won't notice.
+
+### Protecting the data on this machine
+
+Case folders hold bank letters, statements and IDs, so they are created owner-only:
+- **Linux and macOS:** folders `0700`, files `0600`.
+- **Windows:** inherited permissions (often `Authenticated Users: Modify` from the drive) are removed, and only your account and SYSTEM get access. Python 3.12.4+ also grants Administrators, who can take ownership of any file anyway.
+
+For a case created before this existed, run:
+
+```bash
+python -m audit_tool secure bank-2026
+```
+
+`verify` warns on Linux and macOS when a case is readable by other accounts. The tool does **not** encrypt case files. For encryption at rest, use full-disk encryption (BitLocker, FileVault or LUKS). That protects the same data without complicating verification or key handling.
 
 ### Limits on untrusted files
 
 Evidence may come from the party being audited, so each file's cost is bounded:
-- Text and email files over 20 MB are stored but not parsed.
-- CSVs are read up to 100,000 rows.
-- PDFs are read up to 500 pages, and at most 25 scanned pages are OCR'd.
-- Images over 50 megapixels are not OCR'd.
+- **Size limits:** text and email files over 20 MB, CSVs over 50 MB, PDFs over 100 MB and images over 50 MB are stored but not parsed.
+- **CSVs** are read up to 100,000 rows. A malformed row, such as one with a field over the CSV module's size limit, stops reading with a warning instead of crashing.
+- **PDFs** are read up to 500 pages, and at most 25 scanned pages are OCR'd.
+- **Images** over 50 megapixels are not OCR'd.
+- **Isolated decoding:** PDF and image decoding (pypdf, pdfium, Pillow, RapidOCR) runs in a separate child process with a 5-minute time limit. A decoder bug can't read the signing key from the tool's memory, and a crash or hang can't take the tool down with it. The key file's path isn't passed to the child either. The child still runs as your OS user, so this isn't a full sandbox.
 
 The limits are constants at the top of `ingest.py` and `extract.py`. Report text from evidence is escaped, so a document can't inject headings, links or fake findings into the case file.
 
 ## Tests
 
 ```bash
-pip install -e ".[ocr,dev]"
+pip install -e ".[ocr,sign,dev]"
 python -m pytest
 ```
 

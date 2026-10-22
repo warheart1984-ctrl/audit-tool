@@ -16,7 +16,7 @@ from email import policy as email_policy
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-from .extract import ExtractedText, extract
+from .extract import ExtractedText, extract, extract_isolated
 
 TEXT_EXT = {".txt", ".md", ".log"}
 EMAIL_EXT = {".eml"}
@@ -26,6 +26,9 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
 
 # Evidence is untrusted input; bound the work any one file can cause.
 MAX_TEXT_BYTES = 20 * 1024 * 1024  # emails, letters, transcripts
+MAX_CSV_BYTES = 50 * 1024 * 1024
+MAX_PDF_BYTES = 100 * 1024 * 1024
+MAX_IMAGE_BYTES = 50 * 1024 * 1024
 MAX_CSV_ROWS = 100_000
 
 # 550 5.7.193 / 550.5.7.193 / 554-5.7.1
@@ -349,7 +352,15 @@ def ingest_csv(path: Path) -> tuple[list[dict], list[str]]:
             return [], [f"no status column found (looked for {', '.join(STATUS_COLUMNS)}; "
                         f"columns are: {', '.join(sorted(headers)) or 'none'}); nothing ingested"]
         events = []
-        for i, row in enumerate(reader, start=2):
+        rows = enumerate(reader, start=2)
+        while True:
+            try:
+                i, row = next(rows)
+            except StopIteration:
+                break
+            except csv.Error as exc:  # e.g. a field over the csv module's size limit
+                warnings.append(f"stopped at line {reader.line_num}: {exc}; the rest were not read")
+                break
             if i - 1 > MAX_CSV_ROWS:
                 warnings.append(f"stopped after {MAX_CSV_ROWS} rows; the rest were not read")
                 break
@@ -371,12 +382,12 @@ def ingest_csv(path: Path) -> tuple[list[dict], list[str]]:
     return events, warnings
 
 
-def ingest_binary(path: Path, kind: str, use_ocr: bool = True) -> IngestResult:
+def ingest_binary(path: Path, kind: str, use_ocr: bool = True, isolate: bool = True) -> IngestResult:
     """Screenshots and PDFs: recover text with OCR / the PDF text layer, then analyse it."""
     if not use_ocr:
         return IngestResult([{"source_type": kind, "origin": {},
                               "notes": "Binary artifact preserved (text extraction skipped). Enter its facts with `audit edit`."}])
-    ex = extract(path)
+    ex = extract_isolated(path) if isolate else extract(path)
     if not ex.text.strip():
         note = "Binary artifact preserved; no text could be extracted. Enter its facts with `audit edit`."
         if ex.warnings:
@@ -387,15 +398,39 @@ def ingest_binary(path: Path, kind: str, use_ocr: bool = True) -> IngestResult:
     return IngestResult([fields_], ex, ex.warnings)
 
 
-def ingest_file(path: Path, source_type: str | None = None, use_ocr: bool = True) -> IngestResult:
+def _size_limit(ext: str) -> int | None:
+    if ext in EMAIL_EXT | TEXT_EXT:
+        return MAX_TEXT_BYTES
+    if ext in CSV_EXT:
+        return MAX_CSV_BYTES
+    if ext in PDF_EXT:
+        return MAX_PDF_BYTES
+    if ext in IMAGE_EXT:
+        return MAX_IMAGE_BYTES
+    return None
+
+
+def ingest_file(path: Path, source_type: str | None = None, use_ocr: bool = True,
+                isolate: bool = True) -> IngestResult:
+    result = _ingest(path, source_type, use_ocr, isolate)
+    # Anything that limited or degraded the extraction belongs in the record,
+    # not only on the screen at ingest time.
+    if result.warnings:
+        note = "Ingest warnings: " + "; ".join(result.warnings)
+        for ev in result.events:
+            ev["notes"] = f"{ev['notes']} {note}" if ev.get("notes") else note
+    return result
+
+
+def _ingest(path: Path, source_type: str | None, use_ocr: bool, isolate: bool) -> IngestResult:
     ext = path.suffix.lower()
     size = path.stat().st_size
-    # CSVs are streamed with a row cap instead; emails and text are read whole.
-    if ext in EMAIL_EXT | TEXT_EXT and size > MAX_TEXT_BYTES:
-        return IngestResult([{"source_type": source_type or "other", "origin": {},
+    limit = _size_limit(ext)
+    if limit is not None and size > limit:
+        return IngestResult([{"source_type": source_type or detect_type(path), "origin": {},
                               "notes": f"File too large for automatic extraction ({size} bytes). "
                                        "Preserved as evidence; enter its facts with `audit edit`."}],
-                            warnings=[f"{size} bytes exceeds the {MAX_TEXT_BYTES}-byte text limit; not parsed"])
+                            warnings=[f"{size} bytes exceeds the {limit}-byte limit for {ext} files; not parsed"])
     kind = detect_type(path, source_type)
     if ext in CSV_EXT:
         events, warnings = ingest_csv(path)
@@ -405,6 +440,6 @@ def ingest_file(path: Path, source_type: str | None = None, use_ocr: bool = True
     if ext in TEXT_EXT:
         return IngestResult(ingest_text(path, kind))
     if ext in IMAGE_EXT or ext in PDF_EXT:
-        return ingest_binary(path, kind, use_ocr)
+        return ingest_binary(path, kind, use_ocr, isolate)
     return IngestResult([{"source_type": kind, "origin": {},
                           "notes": "Unrecognised file type preserved. Enter its facts with `audit edit`."}])

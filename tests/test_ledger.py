@@ -33,7 +33,7 @@ def test_whole_ledger_rewrite_is_caught_by_an_anchored_head(ws):
 
     assert case.verify() == []  # the chain alone can't see this ...
     problems = case.verify(expect_head=anchored)  # ... the saved head can
-    assert any("anchored head" in p for p in problems)
+    assert any("not in this ledger at its recorded position" in p for p in problems)
 
 
 def test_anchor_still_verifies_after_later_appends(ws):

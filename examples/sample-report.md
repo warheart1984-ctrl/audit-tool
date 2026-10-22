@@ -2,7 +2,7 @@
 
 - **Case ID:** demo
 - **Institution:** Example Bank
-- **Generated:** 2026-10-21T23:41:36+00:00
+- **Generated:** 2026-10-22T01:09:02+00:00
 - **Ledger integrity:** VERIFIED
 
 ## Summary
@@ -337,7 +337,7 @@ Human involved: unknown
 Notice provided: unknown
 Reproducible: unknown
 Evidence status: unverified
-Notes: Binary artifact preserved; no text could be extracted. Enter its facts with `audit edit`. (could not read file for text extraction: cannot identify image file 'examples\\app_banner.png')
+Notes: Binary artifact preserved; no text could be extracted. Enter its facts with `audit edit`. (could not read file for text extraction: cannot identify image file 'examples\\app_banner.png') Ingest warnings: could not read file for text extraction: cannot identify image file 'examples\\app_banner.png'
 ```
 - Artifact app\_banner.png (name as supplied) → evidence/7332b0057d6b\_app\_banner.png, 29 bytes, SHA-256 7332b0057d6b283cbabdf237022735f3aa65f7a465b9454d8466be0dedcd410d
 
@@ -345,7 +345,7 @@ Notes: Binary artifact preserved; no text could be extracted. Enter its facts wi
 
 All 19 ledger entries chain correctly, every evidence file matches its recorded SHA-256 hash, and the evidence folder holds no unrecorded files.
 
-Ledger head at the time of this report: `ca11dd41646e12b0ad5e9a173719078f1fc6d0e4609b4c73d2be7353cf669dbb`. Anyone holding an earlier head hash can confirm with `audit verify --expect <hash>` that the history up to that point has not been rewritten.
+Ledger anchor at the time of this report: `19:030624f47d4e64f1c00a9d97f24c944bb5b65622addce9ffddac53cde64071b8`. Anyone holding it can confirm with `audit verify --expect <anchor> --exact` that the ledger is still exactly as it was when this report was made.
 
 ## Method and limitations
 

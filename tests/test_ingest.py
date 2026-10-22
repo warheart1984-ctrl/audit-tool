@@ -38,7 +38,7 @@ def test_oversized_text_file_is_not_parsed(tmp_path, monkeypatch):
     f.write_text("Your account was restricted. " * 20)
     result = ingest_file(f)
     assert len(result.events) == 1 and "decision" not in result.events[0]
-    assert any("text limit" in w for w in result.warnings)
+    assert any("-byte limit for .txt files" in w for w in result.warnings)
 
 
 def test_bounce_text_with_ocr_dropped_spaces():
