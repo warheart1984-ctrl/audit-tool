@@ -1,0 +1,5 @@
+# The ledger corpus is byte-exact test data: the ledgers record the SHA-256 of
+# every evidence file. Git must store and check out these files unchanged, or a
+# Windows checkout with core.autocrlf=true rewrites line endings and every
+# evidence hash fails.
+independent/corpus/** -text

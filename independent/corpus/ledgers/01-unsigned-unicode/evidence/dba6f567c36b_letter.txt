@@ -1,0 +1,9 @@
+Example Bank
+10 October 2026
+
+Decision: Declined
+Reason: Insufficient funds on the account.
+Policy: Section 12.3 of the account terms.
+Date: 2026-10-10
+This decision was made by an automated system.
+No appeal path is disclosed in this letter.
