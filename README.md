@@ -157,6 +157,19 @@ pip install -e ".[ocr,sign,dev]"
 python -m pytest
 ```
 
+### Mutation testing: do the tests actually enforce the guarantees?
+
+A passing suite only proves the cases someone thought to test. The code and most of its tests were written by the same author, so they can share the same blind spots. `tools/mutation/` checks the tests independently. It plants known defects one at a time in a temporary copy of the repo, such as turning off the chain-link check, letting extracted text clear findings, or dropping an evidence-folder check, and confirms the suite fails for each one.
+
+```bash
+python tools/mutation/run.py            # all mutants, about 15 minutes
+python tools/mutation/run.py L1 R2      # selected mutants
+```
+
+Each defect that survives is a guarantee no test enforces. The first run caught 34 of 42. The 7 real survivors now each have a test in `tests/test_blind_spots.py`, and every applicable mutant is caught. Platform-specific mutants (Windows ACLs, POSIX modes) report `n/a` on the other platform. To cover both, run the **mutation** workflow from the Actions tab (`gh workflow run mutation.yml`).
+
+When you change code a mutant targets, the runner reports it as STALE instead of letting it pass silently, so update `tools/mutation/mutants.py`. When you add a guarantee, add a mutant for it.
+
 ## Limits
 
 Findings describe what is missing from the *collected record*, not what happened inside the institution. Text extraction is pattern-based, so review each event. Extracted labels, such as which mail system bounced a message, can be spoofed by whoever wrote the document. That's why they stay *unconfirmed* until you check them. This is not legal advice.

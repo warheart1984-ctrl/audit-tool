@@ -1,0 +1,28 @@
+name: mutation
+
+# Plants known defects and checks the test suite catches each one
+# (tools/mutation). Takes about 15 minutes, so it runs on demand:
+# Actions tab -> mutation -> Run workflow, or `gh workflow run mutation.yml`.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install ".[ocr,sign,dev]"
+      - name: Mutation run
+        run: python tools/mutation/run.py

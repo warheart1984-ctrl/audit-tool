@@ -74,17 +74,19 @@ Three outside security reviews were done. Every confirmed finding was fixed with
 
 ```bash
 pip install -e ".[ocr,sign,dev]"
-python -m pytest                     # 119 tests; POSIX-only tests skip on Windows and run in CI
+python -m pytest                     # 127 tests; platform-specific tests skip where they don't apply
+python tools/mutation/run.py         # mutation run: plants 42 known defects, checks each is caught (~15 min)
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 
-CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Python 3.11 and 3.12 on every push and PR.
+CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Python 3.11 and 3.12 on every push and PR. The `mutation` workflow runs the mutation harness on both platforms when triggered by hand from the Actions tab.
 
 ## House rules
 
 - **Never commit real evidence.** `cases/` and image, PDF and `.eml` files in the repo root are git-ignored. The owner's real case files are kept locally and are not in this repo.
 - **Keep private keys out of the repo.** `keygen` refuses to write a key inside `cases/`.
 - **Every security fix needs a test** that fails on the old code.
+- **Every guarantee needs a mutant.** Add one to `tools/mutation/mutants.py` and check it's killed. A green suite isn't proof on its own: the first mutation run found 7 guarantees no test enforced, now covered in `tests/test_blind_spots.py`.
 
 ## Reasonable next steps
 
