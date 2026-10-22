@@ -1,0 +1,5 @@
+Call transcript
+Agent: The payment was held.
+Customer: I was not told about an appeal.
+Decision: Held
+Reason: Review pending

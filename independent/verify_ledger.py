@@ -2,8 +2,11 @@
 """Clean-room verifier for audit-tool ledger.jsonl.
 
 Written only from docs/LEDGER_FORMAT.md and the verify/anchor usage in
-README.md. This file does not import the audit tool and was not written
-by reading audit_tool/ or tests/.
+README.md. This file does not import the audit tool. The implementation
+under audit_tool/ and tests/ was not read while this verifier was written.
+The one later edit, reading stored_path and sha256 from payload["artifact"]
+as well as from the payload itself, came from ledger JSON the CLI produced,
+still before that source was opened.
 
 Checks, in the words of the format spec:
 
@@ -725,14 +728,20 @@ def _check_evidence(
         seq_value = seq if isinstance(seq, int) and not isinstance(seq, bool) else None
         if not isinstance(payload, dict):
             continue
-        stored = payload.get("stored_path")
-        digest = payload.get("sha256")
+        # The format spec says each artifact names stored_path and sha256.
+        # It does not say those keys sit on the payload itself. Real
+        # artifact.link entries put them on payload["artifact"]; accept
+        # either place.
+        artifact = payload.get("artifact")
+        home = artifact if isinstance(artifact, dict) else payload
+        stored = home.get("stored_path")
+        digest = home.get("sha256")
         if not isinstance(stored, str) or not _is_lower_hex(digest, 64):
             errors.append(
                 Finding(
                     "error",
                     "artifact_fields",
-                    "artifact payload needs stored_path and lowercase sha256",
+                    "artifact needs stored_path and lowercase sha256",
                     seq=seq_value,
                 )
             )
