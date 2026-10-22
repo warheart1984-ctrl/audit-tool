@@ -29,6 +29,12 @@ MUTANTS = [
      "invalid signature flagged"),
     ("L11", "ledger.py", 'if "kid" in entry and "sig" not in entry:', "if False:",
      "removed signature caught by its leftover kid (PR #1)"),
+    ("U1", "ledger.py", "                    except UnicodeEncodeError:\n",
+     "                    except ZeroDivisionError:\n", "lone surrogate is an integrity failure, not a crash (PR #1)"),
+    ("U2", "ledger.py", "        except UnicodeDecodeError as exc:", "        except ZeroDivisionError as exc:",
+     "invalid UTF-8 is an integrity failure, not a crash"),
+    ("U3", "cli.py", 'print(f"INTEGRITY FAILED: {exc}", file=sys.stderr)\n        sys.exit(2)',
+     'print(f"INTEGRITY FAILED: {exc}", file=sys.stderr)\n        sys.exit(1)', "unreadable ledger exits 2"),
     # store.py: replay, case ids, evidence folder
     ("S1", "store.py", 'p["origin"] = {k: v for k, v in origin.items() if v == "extracted"}', 'p["origin"] = origin',
      "confirmation can't be claimed at creation (T5)"),

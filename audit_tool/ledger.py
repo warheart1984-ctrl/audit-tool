@@ -37,6 +37,10 @@ LOCK_TIMEOUT = 15.0  # seconds to wait for another writer
 STALE_LOCK = 60.0  # a lock older than this was left by a crashed writer
 
 
+class LedgerUnreadable(ValueError):
+    """The ledger file can't be parsed into entries. Always an integrity failure."""
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -132,17 +136,29 @@ class Ledger:
 
     def _read(self) -> list[dict]:
         out = []
-        with self.path.open(encoding="utf-8") as fh:
-            for n, line in enumerate(fh, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    raise ValueError(f"ledger {self.path} line {n} is not valid JSON") from None
-                if not isinstance(entry, dict):
-                    raise ValueError(f"ledger {self.path} line {n} is not a ledger entry")
-                out.append(entry)
+        try:
+            with self.path.open(encoding="utf-8") as fh:
+                for n, line in enumerate(fh, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} is not valid JSON") from None
+                    if not isinstance(entry, dict):
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} is not a ledger entry")
+                    try:
+                        # A JSON escape like \ud800 decodes to a lone surrogate, which has no UTF-8
+                        # form, so the entry can't be hashed canonically. Reject it here, as an
+                        # integrity failure, rather than crash later while hashing.
+                        json.dumps(entry, ensure_ascii=False).encode("utf-8")
+                    except UnicodeEncodeError:
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} contains text that is not valid "
+                                               "Unicode (a lone surrogate), so it can't be hashed") from None
+                    out.append(entry)
+        except UnicodeDecodeError as exc:
+            raise LedgerUnreadable(f"ledger {self.path} is not valid UTF-8 ({exc.reason} at byte {exc.start})") \
+                from None
         return out
 
     def entries(self, fresh: bool = False) -> list[dict]:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .extract import extract_isolated
 from .ingest import ingest_file
-from .ledger import generate_keypair, key_id, load_private_key, load_public_key
+from .ledger import LedgerUnreadable, generate_keypair, key_id, load_private_key, load_public_key
 from .models import EDITABLE, SOURCE_TYPES, validate_field
 from .report import LEDGER_FIELDS, render_json, render_markdown
 from .rules import audit, flag
@@ -379,6 +379,10 @@ def main(argv: list[str] | None = None) -> None:
         root = Path(args.root)
         signer, verify_key = _keys(args, root)
         args.func(Workspace(root, signer=signer, verify_key=verify_key, actor=args.actor), args)
+    except LedgerUnreadable as exc:
+        # Whatever the command, a ledger that can't be read is an integrity failure.
+        print(f"INTEGRITY FAILED: {exc}", file=sys.stderr)
+        sys.exit(2)
     except (ValueError, KeyError, FileNotFoundError, FileExistsError, TimeoutError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -75,7 +75,7 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
 - Evidence files are copied byte for byte into `cases/<id>/evidence/` and identified by SHA-256. A file that produces no event, such as a statement with nothing adverse in it, is still stored and recorded as "checked, nothing adverse", with any ingest warnings. Warnings that limited an extraction are also saved with the event, not just printed.
 - `ledger.jsonl` is append-only and hash-chained. Corrections are added as new entries, so the history stays visible.
 - `verify` reports:
-  - edited, deleted or unreadable ledger lines;
+  - edited, deleted or unreadable ledger lines. A line that can't be parsed (invalid JSON, invalid UTF-8, or a lone surrogate such as `\ud800`, which can't be hashed) makes every command report INTEGRITY FAILED with exit code 2, and `list` marks that case and carries on;
   - entries that refer to events that don't exist;
   - evidence files that changed or went missing;
   - files or symbolic links in `evidence/` that the ledger doesn't list;
