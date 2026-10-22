@@ -11,7 +11,7 @@ No supporting evidence was provided for the decision.
 No appeal path was disclosed.
 ```
 
-It needs Python 3.10+. The core has no dependencies. To read text from screenshots and PDF letters, install the OCR extras:
+It needs Python 3.11+ (the OCR extra requires Pillow 13, which needs 3.11). The core has no dependencies. To read text from screenshots and PDF letters, install the OCR extras:
 
 ```bash
 pip install -e ".[ocr]"

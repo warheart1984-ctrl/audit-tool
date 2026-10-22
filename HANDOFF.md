@@ -4,7 +4,7 @@ Hi Steven. This note gets you productive quickly. The [README](README.md) has th
 
 ## What it is
 
-A command-line tool that turns evidence about automated decisions into an audit case file. The evidence can be bounce emails, denial letters, call transcripts, bank CSVs, screenshots or PDFs. Each case file says what the record shows and what it lacks: no human review, no cited rule, no supporting evidence, no appeal path. Python 3.10+. The core has no dependencies; OCR and PDF support are optional extras.
+A command-line tool that turns evidence about automated decisions into an audit case file. The evidence can be bounce emails, denial letters, call transcripts, bank CSVs, screenshots or PDFs. Each case file says what the record shows and what it lacks: no human review, no cited rule, no supporting evidence, no appeal path. Python 3.11+. The core has no dependencies; OCR and PDF support are optional extras.
 
 ## How it works
 
@@ -78,7 +78,7 @@ python -m pytest                     # 119 tests; POSIX-only tests skip on Windo
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 
-CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Python 3.10 and 3.12 on every push and PR.
+CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Python 3.11 and 3.12 on every push and PR.
 
 ## House rules
 

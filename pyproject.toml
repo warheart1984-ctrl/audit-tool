@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "audit-tool"
 version = "0.1.0"
 description = "Build evidence-based case files for automated decisions (email rejections, bank denials, etc.)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # Pillow 13 (security floor for the OCR extra) needs 3.11+
 license = { text = "MIT" }
 
 [project.optional-dependencies]
