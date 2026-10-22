@@ -9,12 +9,12 @@ from pathlib import Path
 
 from .extract import extract_isolated
 from .ingest import ingest_file
-from .ledger import generate_keypair, key_id, load_private_key, load_public_key
+from .ledger import LedgerUnreadable, generate_keypair, key_id, load_private_key, load_public_key
 from .models import EDITABLE, SOURCE_TYPES, validate_field
 from .report import LEDGER_FIELDS, render_json, render_markdown
 from .rules import audit, flag
 from .secure import loose_permissions, restrict_file, restrict_tree
-from .store import PUBLIC_KEY_FILE, Case, Workspace, sha256_file
+from .store import Case, Workspace, sha256_file
 
 
 def _outside_root(path: Path, root: Path) -> None:
@@ -65,6 +65,7 @@ def cmd_list(ws: Workspace, a) -> None:
 
 def cmd_ingest(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
+    case.require_signer_if_signed()
     for raw in a.files:
         path = Path(raw)
         if not path.is_file():
@@ -111,6 +112,7 @@ def cmd_extract(ws: Workspace, a) -> None:
 
 def cmd_add(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
+    case.require_signer_if_signed()
     changes = {}
     for pair in a.set or []:
         name, sep, value = pair.partition("=")
@@ -128,6 +130,7 @@ def cmd_add(ws: Workspace, a) -> None:
 
 def cmd_edit(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
+    case.require_signer_if_signed()
     changes = {}
     for pair in a.set:
         name, sep, value = pair.partition("=")
@@ -141,6 +144,7 @@ def cmd_edit(ws: Workspace, a) -> None:
 
 def cmd_attach(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
+    case.require_signer_if_signed()
     art = case.link_artifact(a.event, Path(a.file))
     print(f"Attached {art['original_name']} to {a.event} (sha256 {art['sha256'][:16]}…)")
     print_head(case)
@@ -175,10 +179,9 @@ def cmd_check(ws: Workspace, a) -> None:
 def cmd_verify(ws: Workspace, a) -> None:
     case = ws.open_case(a.case)
     key_note = None
-    if case.ledger.verify_key is None and case.ledger.is_signed() and (case.dir / PUBLIC_KEY_FILE).exists():
-        # Fall back to the public key shipped with the case; it is only as good as
-        # the key id the owner saved elsewhere, so say which one it is.
-        case = Case(case.dir, verify_key=load_public_key(case.dir / PUBLIC_KEY_FILE))
+    if case.key_source == "case-file":
+        # The key shipped with the case is only as good as the key id the owner
+        # saved elsewhere, so say which one it is.
         key_note = (f"Note: checked signatures with the public key stored in the case folder (key id "
                     f"{case.ledger.kid}). Compare that id with the one the owner gave you; pass "
                     "--public-key to use a copy you trust instead.")
@@ -376,6 +379,10 @@ def main(argv: list[str] | None = None) -> None:
         root = Path(args.root)
         signer, verify_key = _keys(args, root)
         args.func(Workspace(root, signer=signer, verify_key=verify_key, actor=args.actor), args)
+    except LedgerUnreadable as exc:
+        # Whatever the command, a ledger that can't be read is an integrity failure.
+        print(f"INTEGRITY FAILED: {exc}", file=sys.stderr)
+        sys.exit(2)
     except (ValueError, KeyError, FileNotFoundError, FileExistsError, TimeoutError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)

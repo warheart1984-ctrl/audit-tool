@@ -37,6 +37,10 @@ LOCK_TIMEOUT = 15.0  # seconds to wait for another writer
 STALE_LOCK = 60.0  # a lock older than this was left by a crashed writer
 
 
+class LedgerUnreadable(ValueError):
+    """The ledger file can't be parsed into entries. Always an integrity failure."""
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -132,17 +136,29 @@ class Ledger:
 
     def _read(self) -> list[dict]:
         out = []
-        with self.path.open(encoding="utf-8") as fh:
-            for n, line in enumerate(fh, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    raise ValueError(f"ledger {self.path} line {n} is not valid JSON") from None
-                if not isinstance(entry, dict):
-                    raise ValueError(f"ledger {self.path} line {n} is not a ledger entry")
-                out.append(entry)
+        try:
+            with self.path.open(encoding="utf-8") as fh:
+                for n, line in enumerate(fh, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} is not valid JSON") from None
+                    if not isinstance(entry, dict):
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} is not a ledger entry")
+                    try:
+                        # A JSON escape like \ud800 decodes to a lone surrogate, which has no UTF-8
+                        # form, so the entry can't be hashed canonically. Reject it here, as an
+                        # integrity failure, rather than crash later while hashing.
+                        json.dumps(entry, ensure_ascii=False).encode("utf-8")
+                    except UnicodeEncodeError:
+                        raise LedgerUnreadable(f"ledger {self.path} line {n} contains text that is not valid "
+                                               "Unicode (a lone surrogate), so it can't be hashed") from None
+                    out.append(entry)
+        except UnicodeDecodeError as exc:
+            raise LedgerUnreadable(f"ledger {self.path} is not valid UTF-8 ({exc.reason} at byte {exc.start})") \
+                from None
         return out
 
     def entries(self, fresh: bool = False) -> list[dict]:
@@ -273,16 +289,25 @@ class Ledger:
                 intact = False
             if not intact:
                 problems.append(f"entry {i}: content does not match its hash (modified after recording)")
+            if "kid" in entry and "sig" not in entry:
+                # `kid` is covered by the hash and `sig` is not, so a signature can be deleted
+                # without breaking the chain; the leftover key id is what gives it away. Checked
+                # here, without any key, so every command that verifies catches it.
+                problems.append(f"entry {i}: signature removed (entry names signing key {entry['kid']} "
+                                "but carries no signature)")
             prev = entry.get("hash")
         if self.verify_key is not None:
             problems += self._verify_signatures(entries)
         return problems
 
     def unsigned_prefix(self) -> int:
-        """Number of unsigned entries before the first signed one (history from before signing began)."""
+        """Number of unsigned entries before the first signed one (history from before signing began).
+
+        An entry that names a key (`kid`) was signed, even if its signature is now missing.
+        """
         n = 0
         for e in self.entries(fresh=True):
-            if "sig" in e:
+            if "sig" in e or "kid" in e:
                 return n
             n += 1
         return n
@@ -298,6 +323,10 @@ class Ledger:
         for i, entry in enumerate(entries, start=1):
             sig = entry.get("sig")
             if sig is None:
+                if "kid" in entry:
+                    # Was signed; its missing signature is reported by verify(). Signing began here.
+                    signing_started = True
+                    continue
                 # Unsigned history from before signing was turned on is allowed; a gap after it is not.
                 if signing_started:
                     problems.append(f"entry {i}: unsigned entry after signing began (written without the key)")

@@ -112,6 +112,7 @@ def test_dependency_pins_allow_security_releases():
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     ocr = re.search(r"ocr = \[(.*?)\]", text, re.S).group(1)
     assert '"Pillow>=13.0.0"' in ocr
+    assert '"pypdf>=6.21.2"' in ocr  # CVE-2026-113786 (6.21.1) and the xref runtime advisories (6.21.2)
     assert "<" not in ocr, "upper bounds on parser libraries block security fixes"
 
 
