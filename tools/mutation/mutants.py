@@ -56,6 +56,11 @@ MUTANTS = [
      "if False:\n            # Fail closed", "signed case without a usable public key fails closed"),
     ("K3", "store.py", "if self.ledger.signer is None and self.ledger.is_signed():", "if False:",
      "no unsigned writes to a signed case"),
+    ("E1", "store.py", "        if not entries:\n            problems.append(\"ledger is empty",
+     "        if False:\n            problems.append(\"ledger is empty", "empty case ledger fails"),
+    ("E2", "store.py", 'elif entries[0].get("kind") != "case.create":', "elif False:",
+     "case ledger starts with case.create"),
+    ("E3", "store.py", "        if repeats:\n", "        if False:\n", "case.create appears only once"),
     # rules.py: the trust boundary (T4) and the gate
     ("R1", "rules.py", 'return bool(getattr(ev, name)) and ev.origin.get(name) == "confirmed"',
      "return bool(getattr(ev, name))", "extracted text can't clear findings (T4)"),

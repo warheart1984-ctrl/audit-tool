@@ -20,6 +20,8 @@ This is everything you need to verify a case's `ledger.jsonl` **without this too
 
 Any other field means the ledger has been tampered with.
 
+A case's ledger starts with its `case.create` entry. Entry 1 must have `kind` `case.create`, and no later entry may. An empty ledger, or a chain that starts with any other kind, has lost the start of its history and fails verification, even if every remaining hash checks out.
+
 ## Entry hash
 
 1. Take `seq`, `ts`, `kind`, `payload` and `prev`, plus `actor` and `kid` if present. Leave out `hash` and `sig`.

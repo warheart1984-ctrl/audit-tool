@@ -74,8 +74,8 @@ Three outside security reviews were done. Every confirmed finding was fixed with
 
 ```bash
 pip install -e ".[ocr,sign,dev]"
-python -m pytest                     # 153 tests; platform-specific tests skip where they don't apply
-python tools/mutation/run.py         # mutation run: plants 55 known defects, checks each is caught (~20 min)
+python -m pytest                     # 159 tests; platform-specific tests skip where they don't apply
+python tools/mutation/run.py         # mutation run: plants 58 known defects, checks each is caught (~20 min)
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 

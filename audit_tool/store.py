@@ -298,6 +298,18 @@ class Case:
         problems = self.ledger.verify()
         if problems and problems[0].startswith("line "):
             return problems  # unreadable ledger: nothing below can be trusted
+        # A case's history starts with its creation, exactly once. Without this, an
+        # emptied ledger, or a valid chain that starts mid-story, verified as intact.
+        entries = self.ledger.entries(fresh=True)
+        if not entries:
+            problems.append("ledger is empty: a case's ledger must start with a case.create entry")
+        elif entries[0].get("kind") != "case.create":
+            problems.append(f"entry 1 is {entries[0].get('kind')!r}, not case.create: "
+                            "the start of this case's history is missing")
+        repeats = [str(e.get("seq")) for e in entries[1:] if e.get("kind") == "case.create"]
+        if repeats:
+            problems.append(f"entr{'y' if len(repeats) == 1 else 'ies'} {', '.join(repeats)}: "
+                            "case.create may only be entry 1")
         if self.ledger.verify_key is None and self.ledger.is_signed():
             # Fail closed: otherwise deleting signing-key.pub would hide a forged signature.
             problems.append("signatures can't be checked: " + (
