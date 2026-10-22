@@ -74,8 +74,8 @@ Three outside security reviews were done. Every confirmed finding was fixed with
 
 ```bash
 pip install -e ".[ocr,sign,dev]"
-python -m pytest                     # 127 tests; platform-specific tests skip where they don't apply
-python tools/mutation/run.py         # mutation run: plants 42 known defects, checks each is caught (~15 min)
+python -m pytest                     # 134 tests; platform-specific tests skip where they don't apply
+python tools/mutation/run.py         # mutation run: plants 49 known defects, checks each is caught (~20 min)
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 
@@ -86,6 +86,7 @@ CI (`.github/workflows/tests.yml`) runs the suite on Linux and Windows with Pyth
 - **Never commit real evidence.** `cases/` and image, PDF and `.eml` files in the repo root are git-ignored. The owner's real case files are kept locally and are not in this repo.
 - **Keep private keys out of the repo.** `keygen` refuses to write a key inside `cases/`.
 - **Every security fix needs a test** that fails on the old code.
+- **Don't change the ledger format casually.** It's specified in `docs/LEDGER_FORMAT.md`, and `tests/test_known_answers.py` pins it to values computed with `sha256sum`, OpenSSL and RFC 8032. If a known-answer test fails, you broke compatibility with every independent verifier. Don't "fix" the expected values; recompute them outside the tool, and only for a deliberate, versioned format change.
 - **Every guarantee needs a mutant.** Add one to `tools/mutation/mutants.py` and check it's killed. A green suite isn't proof on its own: the first mutation run found 7 guarantees no test enforced, now covered in `tests/test_blind_spots.py`.
 
 ## Reasonable next steps

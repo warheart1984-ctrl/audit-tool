@@ -1,7 +1,9 @@
 """Planted defects, each targeting one guarantee the README claims.
 
 Each mutant is (id, file in audit_tool/, exact original text, replacement,
-guarantee broken). The original text must occur exactly once in the file; the
+guarantee broken). For a defect that needs several coordinated edits, the third
+field is a list of (original, replacement) pairs and the fourth is None.
+Every original text must occur exactly once in the file; the
 runner refuses to run a mutant that doesn't apply, so it can't "survive" by
 never having been planted. When you change guarded code, update its mutant.
 When you add a guarantee, add a mutant for it.
@@ -71,6 +73,21 @@ MUTANTS = [
      "key path hidden from extractor"),
     ("X2", "extract.py", "        if img.width * img.height > MAX_IMAGE_PIXELS:", "        if False:", "image pixel cap"),
     ("X3", "extract.py", "        if i >= MAX_PDF_PAGES:", "        if False:", "PDF page cap"),
+    # Ledger FORMAT: self-consistent changes. The tool still agrees with itself,
+    # so only tests against values computed outside the tool can catch these.
+    # Each would silently break anyone verifying a ledger independently.
+    ("F1", "ledger.py", 'separators=(",", ":"))', "separators=None)", "canonical JSON: compact separators"),
+    ("F2", "ledger.py", "sort_keys=True, ensure_ascii=False,", "sort_keys=True, ensure_ascii=True,",
+     "canonical JSON: UTF-8, not \\u escapes"),
+    ("F3", "ledger.py", "json.dumps(body, sort_keys=True,", "json.dumps(body, sort_keys=False,", "canonical JSON: sorted keys"),
+    ("F4", "ledger.py", 'hashlib.sha256(raw.encode("utf-8"))', 'hashlib.sha3_256(raw.encode("utf-8"))',
+     "entry hash is SHA-256"),
+    ("F5", "ledger.py",
+     [('self.signer.sign(entry["hash"].encode("ascii"))', 'self.signer.sign(bytes.fromhex(entry["hash"]))'),
+      ('str(entry.get("hash")).encode("ascii"))', 'bytes.fromhex(str(entry.get("hash"))))')],
+     None, "signature covers the ASCII hex hash"),
+    ("F6", "ledger.py", "hexdigest()[:16]", "hexdigest()[:12]", "key id is the first 16 hex of SHA-256(public key)"),
+    ("F7", "ledger.py", 'GENESIS = "0" * 64', 'GENESIS = "f" * 64', "chain starts from 64 zeros"),
     # secure.py: permissions
     ("Z1", "secure.py", '"/inheritance:r",\n             "/grant:r"', '"/grant:r"', "Windows: inherited access removed"),
     ("Z2", "secure.py", "    os.chmod(path, 0o700)\n\n\ndef restrict_file", "    pass\n\n\ndef restrict_file", "POSIX: folders 0700"),

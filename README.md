@@ -166,7 +166,9 @@ python tools/mutation/run.py            # all mutants, about 15 minutes
 python tools/mutation/run.py L1 R2      # selected mutants
 ```
 
-Each defect that survives is a guarantee no test enforces. The first run caught 34 of 42. The 7 real survivors now each have a test in `tests/test_blind_spots.py`, and every applicable mutant is caught. Platform-specific mutants (Windows ACLs, POSIX modes) report `n/a` on the other platform. To cover both, run the **mutation** workflow from the Actions tab (`gh workflow run mutation.yml`).
+Each defect that survives is a guarantee no test enforces. The first run caught 34 of 42. The 7 real survivors now each have a test in `tests/test_blind_spots.py`, and every applicable mutant is caught.
+
+Mutants F1–F7 change the ledger **format** consistently, for example other JSON separators, `\u` escapes, another hash algorithm, or signing different bytes. The tool still agrees with itself, so tests that compare the tool with itself can't notice, and before known-answer tests existed, 6 of the 7 survived. `tests/test_known_answers.py` now checks the format against an external oracle: hashes from GNU `sha256sum`, signatures from OpenSSL, and the RFC 8032 Ed25519 test vectors. None of these values were computed with this tool's code. The format itself is specified in [docs/LEDGER_FORMAT.md](docs/LEDGER_FORMAT.md), with a worked example anyone can reproduce with those tools. Platform-specific mutants (Windows ACLs, POSIX modes) report `n/a` on the other platform. To cover both, run the **mutation** workflow from the Actions tab (`gh workflow run mutation.yml`).
 
 When you change code a mutant targets, the runner reports it as STALE instead of letting it pass silently, so update `tools/mutation/mutants.py`. When you add a guarantee, add a mutant for it.
 

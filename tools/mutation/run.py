@@ -70,12 +70,17 @@ def main(selected: list[str]) -> int:
                 continue
             path = work / "audit_tool" / fname
             src = path.read_text(encoding="utf-8")
-            if src.count(old) != 1:
-                print(f"{mid:4} STALE    target text found {src.count(old)} times; update mutants.py  {guarantee}",
+            edits = old if isinstance(old, list) else [(old, new)]
+            counts = [src.count(o) for o, _ in edits]
+            if counts != [1] * len(edits):
+                print(f"{mid:4} STALE    target text found {counts} times; update mutants.py  {guarantee}",
                       flush=True)
                 results.append((mid, "STALE", guarantee))
                 continue
-            path.write_text(src.replace(old, new), encoding="utf-8")
+            mutated = src
+            for o, n in edits:
+                mutated = mutated.replace(o, n)
+            path.write_text(mutated, encoding="utf-8")
             start = time.monotonic()
             try:
                 survived, detail = run_suite(work)
