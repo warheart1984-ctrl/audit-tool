@@ -273,16 +273,25 @@ class Ledger:
                 intact = False
             if not intact:
                 problems.append(f"entry {i}: content does not match its hash (modified after recording)")
+            if "kid" in entry and "sig" not in entry:
+                # `kid` is covered by the hash and `sig` is not, so a signature can be deleted
+                # without breaking the chain; the leftover key id is what gives it away. Checked
+                # here, without any key, so every command that verifies catches it.
+                problems.append(f"entry {i}: signature removed (entry names signing key {entry['kid']} "
+                                "but carries no signature)")
             prev = entry.get("hash")
         if self.verify_key is not None:
             problems += self._verify_signatures(entries)
         return problems
 
     def unsigned_prefix(self) -> int:
-        """Number of unsigned entries before the first signed one (history from before signing began)."""
+        """Number of unsigned entries before the first signed one (history from before signing began).
+
+        An entry that names a key (`kid`) was signed, even if its signature is now missing.
+        """
         n = 0
         for e in self.entries(fresh=True):
-            if "sig" in e:
+            if "sig" in e or "kid" in e:
                 return n
             n += 1
         return n
@@ -298,6 +307,10 @@ class Ledger:
         for i, entry in enumerate(entries, start=1):
             sig = entry.get("sig")
             if sig is None:
+                if "kid" in entry:
+                    # Was signed; its missing signature is reported by verify(). Signing began here.
+                    signing_started = True
+                    continue
                 # Unsigned history from before signing was turned on is allowed; a gap after it is not.
                 if signing_started:
                     problems.append(f"entry {i}: unsigned entry after signing began (written without the key)")

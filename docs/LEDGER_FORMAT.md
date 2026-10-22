@@ -37,7 +37,11 @@ The chain is intact when every entry's `hash` matches step 3, every `prev` equal
 - **`kid`** is the first 16 hex characters of the SHA-256 of the raw 32-byte Ed25519 public key.
 - **`sig`** is the Ed25519 signature (RFC 8032) over the 64 ASCII characters of `hash`, written as lowercase hex.
 
-Unsigned entries are allowed only *before* the first signed one. That's history from before signing was turned on.
+Rules a verifier must apply:
+
+1. **An entry with a `kid` must have a valid `sig`.** `kid` is covered by the hash and `sig` is not, so deleting a signature doesn't break the chain. The leftover `kid` is the only evidence it was there. This rule holds without any key, so check it on every verification.
+2. **Unsigned entries are allowed only *before* the first entry with a `kid`.** That's history from before signing was turned on. Once an entry names a key, every later entry must be signed too: a ledger never goes back from signed to unsigned.
+3. **With a public key in hand,** every signed entry's `kid` must match it, and every `sig` must verify. A ledger with no signed entries at all fails. If you expected signatures and there are none, they may have been removed together with their `kid`s, which rule 1 can't see on its own; the broken hashes would, unless the whole ledger was rewritten. Use an anchor for that.
 
 ## Anchors
 

@@ -80,6 +80,45 @@ def test_strip_all_signatures_is_flagged(signed_case):
     assert any("no entry is signed" in p for p in problems)
 
 
+def _strip_sig_only(ledger_path, index: int) -> None:
+    """Delete one entry's `sig` and nothing else, keeping its `kid` and `actor`."""
+    lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    entry = json.loads(lines[index])
+    del entry["sig"]
+    lines[index] = json.dumps(entry, ensure_ascii=False)
+    ledger_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("index", [0, 1])  # the earliest entry (the reported bypass) and a middle one
+def test_removing_one_signature_but_keeping_its_kid_fails(signed_case, index):
+    # Found by the independent verifier (PR #1). The older strip test removed sig, kid and
+    # actor together, which breaks the hash, so this exact edit was never tried.
+    signed_case.add_event(Event(id="EVT-0001", decision="Declined"))
+    anchor = signed_case.ledger.anchor()
+    _strip_sig_only(signed_case.ledger.path, index)
+    for checker in (signed_case, Case(signed_case.dir), Case(signed_case.dir, verify_key=KEY.public_key())):
+        problems = checker.verify(expect_head=anchor, exact=True)
+        assert any(f"entry {index + 1}: signature removed" in p for p in problems), problems
+
+
+def test_a_stripped_entry_is_not_counted_as_unsigned_history(signed_case):
+    signed_case.add_event(Event(id="EVT-0001", decision="Declined"))
+    _strip_sig_only(signed_case.ledger.path, 0)
+    assert signed_case.ledger.unsigned_prefix() == 0
+
+
+def test_stripped_signature_through_the_cli(cli, tmp_path):
+    key = tmp_path / "k.key"
+    cli("keygen", str(key))
+    cli("--key-file", str(key), "new", "c", "--title", "t")
+    code, out = cli("--key-file", str(key), "add", "c", "--set", "decision=Denied")
+    anchor = out.split("Ledger anchor: ")[1].split()[0]
+    _strip_sig_only(tmp_path / "cases" / "c" / "ledger.jsonl", 0)
+    code, out = cli("--key-file", str(key), "verify", "c", "--expect", anchor, "--exact")
+    assert code == 2 and "signature removed" in out
+    assert cli("check", "c")[0] == 2  # no key needed to notice
+
+
 def test_entry_signed_with_another_key_is_flagged(tmp_path):
     victim = Workspace(tmp_path / "cases", signer=KEY).create_case("c", "t")
     Ledger(victim.ledger.path, signer=OTHER_KEY).append(

@@ -27,6 +27,8 @@ MUTANTS = [
     ("L10", "ledger.py", "except (InvalidSignature, ValueError):\n                problems.append",
      "except (InvalidSignature, ValueError):\n                pass\n            if False:\n                problems.append",
      "invalid signature flagged"),
+    ("L11", "ledger.py", 'if "kid" in entry and "sig" not in entry:', "if False:",
+     "removed signature caught by its leftover kid (PR #1)"),
     # store.py: replay, case ids, evidence folder
     ("S1", "store.py", 'p["origin"] = {k: v for k, v in origin.items() if v == "extracted"}', 'p["origin"] = origin',
      "confirmation can't be claimed at creation (T5)"),
