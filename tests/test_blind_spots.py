@@ -104,9 +104,18 @@ def test_repro_finding_without_a_reason_or_when_not_reproducible():
 # with ordinary permissions, so Python's own owner-only mkdir can't mask a regression.
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
 def test_restrict_dir_removes_inherited_access_on_an_ordinary_folder(tmp_path):
-    folder = tmp_path / "plain"
+    from audit_tool.secure import _system_tool
+
+    # Don't rely on the machine's temp-folder ACL (CI runners differ): give the
+    # parent an inheritable "Users: read" entry so the child certainly inherits it.
+    parent = tmp_path / "parent"
+    os.mkdir(parent)
+    subprocess.run([_system_tool("icacls.exe"), str(parent), "/grant", "*S-1-5-32-545:(OI)(CI)RX"],
+                   capture_output=True, check=True)
+    folder = parent / "plain"
     os.mkdir(folder)  # default mode: inherits the parent's ACL
-    assert "(I)" in windows_acl_entries(folder)
+    before = windows_acl_entries(folder)
+    assert "BUILTIN\\Users:(I)" in before
     restrict_dir(folder)
     acl = windows_acl_entries(folder)
     assert "(I)" not in acl
