@@ -16,8 +16,9 @@ the comparison is run:
   public key's id fails
 * a lone surrogate cannot be canonical UTF-8
 * a fully recomputed chain verifies; the old anchor does not
-* an unsigned ledger is valid ledger format even if a public key is supplied
-  (the README's verify command is stricter; that row is expected to disagree)
+* with a public key supplied, a ledger with no signed entries fails (spec
+  rule 3, added to docs/LEDGER_FORMAT.md after the first run, which had
+  expected this row to pass and to disagree with the tool)
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ def main() -> int:
     results = [_compare(run, env) for run in runs]
     (CORPUS / "compare.json").write_text(
         json.dumps(results, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     disagree = [row for row in results if not row["agree"]]
     print(f"runs={len(results)} disagreements={len(disagree)}")
@@ -144,7 +145,7 @@ def _write_inputs(path: Path) -> dict[str, Path]:
         "Date: 2026-10-10\n"
         "This decision was made by an automated system.\n"
         "No appeal path is disclosed in this letter.\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     notes = path / "notes.txt"
     notes.write_text(
@@ -153,7 +154,7 @@ def _write_inputs(path: Path) -> dict[str, Path]:
         "Customer: I was not told about an appeal.\n"
         "Decision: Held\n"
         "Reason: Review pending\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     csv_path = path / "statement.csv"
     csv_path.write_text(
@@ -161,7 +162,7 @@ def _write_inputs(path: Path) -> dict[str, Path]:
         "2026-10-01,Payroll,1000.00,posted\n"
         "2026-10-02,Card payment,-42.10,declined\n"
         "2026-10-03,Transfer,-15.00,reversed\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     return {"letter": letter, "notes": notes, "csv": csv_path}
 
@@ -355,9 +356,9 @@ def _runs(anchors: dict[str, str]) -> list[Run]:
         Run(
             "15-unsigned-with-key",
             "with-key",
-            True,
+            False,
             use_key=True,
-            note="format spec allows an unsigned ledger; README verify does not",
+            note="spec rule 3: with a public key given, a ledger with no signed entries fails",
         ),
     ]
 
@@ -440,7 +441,7 @@ def _capture(cmd: list[str], env: dict[str, str]) -> tuple[int | None, str]:
             cmd,
             env=env,
             check=False,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             capture_output=True,
             timeout=60,
         )
@@ -452,6 +453,10 @@ def _capture(cmd: list[str], env: dict[str, str]) -> tuple[int | None, str]:
 
 
 def _redact(text: str) -> str:
+    # compare.json is committed: local paths (which carry the username) must not be.
+    for local, placeholder in ((str(CASES), "<corpus>/ledgers"), (str(ROOT.parent), "<repo>"),
+                               (str(Path.home()), "<home>"), (tempfile.gettempdir(), "<tmp>")):
+        text = text.replace(local, placeholder)
     kept: list[str] = []
     for line in text.splitlines():
         upper = line.upper()
@@ -472,7 +477,7 @@ def _audit(args: list[str], env: dict[str, str]) -> None:
 
 
 def _run(cmd: list[str], env: dict[str, str]) -> None:
-    completed = subprocess.run(cmd, env=env, check=False, text=True, capture_output=True)
+    completed = subprocess.run(cmd, env=env, check=False, text=True, encoding="utf-8", errors="replace", capture_output=True)
     if completed.returncode != 0:
         message = _redact((completed.stdout or "") + (completed.stderr or ""))
         raise SystemExit(f"command failed ({completed.returncode}): {cmd[0:6]}\n{message}")
@@ -484,7 +489,7 @@ def _confirm_head(work: Path, anchors: dict[str, str], env: dict[str, str]) -> N
             [sys.executable, "-m", "audit_tool", "--root", str(work), "head", case_id],
             env=env,
             check=False,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             capture_output=True,
         )
         if completed.returncode != 0 or completed.stdout.strip() != anchor:
@@ -502,7 +507,7 @@ def _read(case: Path) -> list[dict[str, Any]]:
 
 def _write(case: Path, entries: list[dict[str, Any]]) -> None:
     text = "\n".join(_dump(entry) for entry in entries) + "\n"
-    (case / "ledger.jsonl").write_text(text, encoding="utf-8")
+    (case / "ledger.jsonl").write_text(text, encoding="utf-8", newline="\n")
 
 
 def _dump(entry: dict[str, Any]) -> str:
@@ -524,7 +529,7 @@ def _edit_field(case: Path) -> None:
     old = "Résumé"
     if old not in text:
         raise SystemExit("edited-field target not found")
-    ledger.write_text(text.replace(old, "Resume", 1), encoding="utf-8")
+    ledger.write_text(text.replace(old, "Resume", 1), encoding="utf-8", newline="\n")
 
 
 def _swap_middle(case: Path) -> None:
@@ -584,7 +589,7 @@ def _strip_earliest_sig(case: Path) -> None:
         if match is None:
             continue
         lines[index] = line[: match.start()] + line[match.end() :]
-        ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        ledger.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
         return
     raise SystemExit("no signature to strip")
 
@@ -617,7 +622,7 @@ def _reorder_keys(case: Path) -> None:
             raise SystemExit("ledger line is not an object")
         reversed_obj = {key: obj[key] for key in reversed(list(obj))}
         lines_out.append(json.dumps(reversed_obj, ensure_ascii=False))
-    ledger.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
+    ledger.write_text("\n".join(lines_out) + "\n", encoding="utf-8", newline="\n")
 
 
 def _escape_unicode(case: Path) -> None:
@@ -629,7 +634,7 @@ def _escape_unicode(case: Path) -> None:
     text = "\n".join(lines_out) + "\n"
     if "\\u" not in text:
         raise SystemExit("unicode escape tamper produced no \\u escapes")
-    ledger.write_text(text, encoding="utf-8")
+    ledger.write_text(text, encoding="utf-8", newline="\n")
 
 
 def _inject_surrogate(case: Path) -> None:
@@ -642,7 +647,7 @@ def _inject_surrogate(case: Path) -> None:
     if end == -1:
         raise SystemExit("title string is not closed")
     lines[0] = lines[0][:end] + "\\uD800" + lines[0][end:]
-    ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ledger.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def _nonascii_sig(case: Path) -> None:
@@ -654,7 +659,7 @@ def _nonascii_sig(case: Path) -> None:
             continue
         digit = match.start(1)
         lines[index] = line[:digit] + "é" + line[digit + 1 :]
-        ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        ledger.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
         return
     raise SystemExit("no signature to alter")
 

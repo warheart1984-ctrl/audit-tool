@@ -18,7 +18,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 6 path(s) are readable by other accounts; run `audit secure 01-unsigned-unicode`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -42,7 +42,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | OK: every entry from #2 on is signed by key 97d93680e4720954. Entries 1-1 predate signing. | Warning: 5 path(s) are readable by other accounts; run `audit secure 02-signed-unicode`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | OK: every entry from #2 on is signed by key 48db760b166948a5. Entries 1-1 predate signing. | Ledger anchor: 6:fe1a06b06c45eeb5d5e49aba7d710f0894c3e013f2c0c968a72095834f1688e2"
     },
     "tool_matches_spec": true,
     "use_key": true
@@ -58,7 +58,7 @@
     },
     "clean_matches_spec": true,
     "exact": true,
-    "expect": "6:1fefe2f0ce3efc69a8c05277b3a35b785cc2c8dd385073d2e6ed8f4c04055078",
+    "expect": "6:fe1a06b06c45eeb5d5e49aba7d710f0894c3e013f2c0c968a72095834f1688e2",
     "name": "exact-anchor",
     "note": "anchor is the current tip",
     "spec_ok": true,
@@ -66,7 +66,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | OK: anchor 6:1fefe2f0ce3efc69a8c05277b3a35b785cc2c8dd385073d2e6ed8f4c04055078 is in the ledger at its position; history up to it is unchanged. | OK: the anchor is the newest entry; nothing was added or removed after it. | OK: every entry from #2 on is signed by key 97d93680e4720954. "
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | OK: anchor 6:fe1a06b06c45eeb5d5e49aba7d710f0894c3e013f2c0c968a72095834f1688e2 is in the ledger at its position; history up to it is unchanged. | OK: the anchor is the newest entry; nothing was added or removed after it. | OK: every entry from #2 on is signed by key 48db760b166948a5. "
     },
     "tool_matches_spec": true,
     "use_key": true
@@ -90,7 +90,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 4 path(s) are readable by other accounts; run `audit secure 03-second-case`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 7:5d0a254b87dd0a612f8f6e4b36a1bbeff4c13655cca20ac810fc81b995eaf9cf"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -167,7 +167,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 6 path(s) are readable by other accounts; run `audit secure 06-truncated-tail`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 11:2fbf0f966996be2f10624a4964298fcd1825787ac011a00c977b3b33cb2dd170"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -185,7 +185,7 @@
     },
     "clean_matches_spec": true,
     "exact": false,
-    "expect": "13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf",
+    "expect": "13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee",
     "name": "expect-old-tip",
     "note": "old tip seq is gone",
     "spec_ok": false,
@@ -193,7 +193,7 @@
       "code": 2,
       "codes": [],
       "status": "fail",
-      "summary": "INTEGRITY FAILED | - anchor 13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf is not in this ledger at its recorded position: history up to it was rewritten, truncated or replaced"
+      "summary": "INTEGRITY FAILED | - anchor 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee is not in this ledger at its recorded position: history up to it was rewritten, truncated or replaced"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -217,7 +217,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 6 path(s) are readable by other accounts; run `audit secure 07-append-after-anchor`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 14:06510acfc8f022afda6d06fbbc5891610a623d695b7e288213bdfc91419976c6"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -233,7 +233,7 @@
     },
     "clean_matches_spec": true,
     "exact": false,
-    "expect": "13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf",
+    "expect": "13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee",
     "name": "expect",
     "note": "history up to the anchor is unchanged; later entry is only a warning",
     "spec_ok": true,
@@ -241,7 +241,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | OK: anchor 13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf is in the ledger at its position; history up to it is unchanged. | Note: 1 entry was added after that anchor and are NOT covered by it. Review them, then save the new anchor. | Note: entries are unsigned, "
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | OK: anchor 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee is in the ledger at its position; history up to it is unchanged. | Note: 1 entry was added after that anchor and are NOT covered by it. Review them, then save the new anchor. | Note: entries are unsigned, "
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -259,7 +259,7 @@
     },
     "clean_matches_spec": true,
     "exact": true,
-    "expect": "13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf",
+    "expect": "13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee",
     "name": "exact",
     "note": "--exact rejects the appended entry",
     "spec_ok": false,
@@ -267,13 +267,13 @@
       "code": 2,
       "codes": [],
       "status": "fail",
-      "summary": "INTEGRITY FAILED | - 1 entry after the anchor 13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf; --exact requires the anchor to be the newest entry"
+      "summary": "INTEGRITY FAILED | - 1 entry after the anchor 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee; --exact requires the anchor to be the newest entry"
     },
     "tool_matches_spec": true,
     "use_key": false
   },
   {
-    "agree": false,
+    "agree": true,
     "case": "08-stripped-earliest-sig",
     "clean": {
       "code": 1,
@@ -290,12 +290,12 @@
     "note": "sig removed from the first signed entry; kid and hash unchanged",
     "spec_ok": false,
     "tool": {
-      "code": 0,
+      "code": 2,
       "codes": [],
-      "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | OK: every entry from #3 on is signed by key 97d93680e4720954. Entries 1-2 predate signing. | Warning: 5 path(s) are readable by other accounts; run `audit secure 08-stripped-earliest-sig`."
+      "status": "fail",
+      "summary": "INTEGRITY FAILED | - entry 2: signature removed (entry names signing key 48db760b166948a5 but carries no signature)"
     },
-    "tool_matches_spec": false,
+    "tool_matches_spec": true,
     "use_key": true
   },
   {
@@ -319,7 +319,7 @@
       "code": 2,
       "codes": [],
       "status": "fail",
-      "summary": "INTEGRITY FAILED | - entry 2: signed by another key (kid 0000000000000000, expected 97d93680e4720954)"
+      "summary": "INTEGRITY FAILED | - entry 2: signed by another key (kid 0000000000000000, expected 48db760b166948a5)"
     },
     "tool_matches_spec": true,
     "use_key": true
@@ -343,7 +343,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | OK: every entry from #2 on is signed by key 97d93680e4720954. Entries 1-1 predate signing. | Warning: 5 path(s) are readable by other accounts; run `audit secure 10-reordered-keys`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | OK: every entry from #2 on is signed by key 48db760b166948a5. Entries 1-1 predate signing. | Ledger anchor: 6:fe1a06b06c45eeb5d5e49aba7d710f0894c3e013f2c0c968a72095834f1688e2"
     },
     "tool_matches_spec": true,
     "use_key": true
@@ -367,7 +367,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 6 path(s) are readable by other accounts; run `audit secure 11-u-escaped`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -390,10 +390,10 @@
     "note": "title contains a lone \\uD800 surrogate",
     "spec_ok": false,
     "tool": {
-      "code": 1,
+      "code": 2,
       "codes": [],
       "status": "fail",
-      "summary": "error: 'utf-8' codec can't encode character '\\ud800' in position 177: surrogates not allowed"
+      "summary": "INTEGRITY FAILED | - line unreadable: ledger <corpus>/ledgers\\12-lone-surrogate\\ledger.jsonl line 1 contains text that is not valid Unicode (a lone surrogate), so it can't be hashed"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -443,7 +443,7 @@
       "code": 0,
       "codes": [],
       "status": "pass",
-      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Warning: 6 path(s) are readable by other accounts; run `audit secure 14-replaced-genesis`."
+      "summary": "OK: ledger chain intact, every evidence file matches its hash, and the evidence folder holds only recorded files. | Note: without --expect, this can't rule out the whole ledger having been replaced. | Note: entries are unsigned, so this can't show who wrote them (see `audit keygen`). | Ledger anchor: 13:9cbdda2d5e2a2c95f001a2050fe8d709d0d61f946a8ef70894e92c256dab81e9"
     },
     "tool_matches_spec": true,
     "use_key": false
@@ -461,7 +461,7 @@
     },
     "clean_matches_spec": true,
     "exact": false,
-    "expect": "13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf",
+    "expect": "13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee",
     "name": "expect-old-tip",
     "note": "old anchor does not match the recomputed tip",
     "spec_ok": false,
@@ -469,33 +469,35 @@
       "code": 2,
       "codes": [],
       "status": "fail",
-      "summary": "INTEGRITY FAILED | - anchor 13:ef8c505a8779335e0f70e07c7370cd0959cd23be4cf69a5567b830d4ef5cbddf is not in this ledger at its recorded position: history up to it was rewritten, truncated or replaced"
+      "summary": "INTEGRITY FAILED | - anchor 13:e1c055df611dc4ad12d5055ebf95256d0235cece73d8fa15ef54e27b8ffe49ee is not in this ledger at its recorded position: history up to it was rewritten, truncated or replaced"
     },
     "tool_matches_spec": true,
     "use_key": false
   },
   {
-    "agree": false,
+    "agree": true,
     "case": "15-unsigned-with-key",
     "clean": {
-      "code": 0,
-      "codes": [],
-      "status": "pass",
-      "summary": "ok"
+      "code": 1,
+      "codes": [
+        "no_signed_entries"
+      ],
+      "status": "fail",
+      "summary": "no_signed_entries"
     },
     "clean_matches_spec": true,
     "exact": false,
     "expect": null,
     "name": "with-key",
-    "note": "format spec allows an unsigned ledger; README verify does not",
-    "spec_ok": true,
+    "note": "spec rule 3: with a public key given, a ledger with no signed entries fails",
+    "spec_ok": false,
     "tool": {
       "code": 2,
       "codes": [],
       "status": "fail",
       "summary": "INTEGRITY FAILED | - no entry is signed with this key"
     },
-    "tool_matches_spec": false,
+    "tool_matches_spec": true,
     "use_key": true
   }
 ]

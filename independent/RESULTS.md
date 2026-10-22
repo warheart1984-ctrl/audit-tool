@@ -3,7 +3,30 @@
 Clean-room checker: `independent/verify_ledger.py` (hashlib and Ed25519 from the `cryptography` library).
 Corpus and comparison: `independent/build_corpus.py`, `independent/corpus/`.
 
-No existing project file is modified.
+No existing project file is modified. One file is added at the repo root: `.gitattributes`, which keeps `independent/corpus/` byte-exact (see below).
+
+## Status after the fixes (re-run against `main` at `d3a6a2d`, 2026-10-22)
+
+The sections after this one record the first run against `6224642` and are kept as found. Since then:
+
+| Finding | Status |
+|---|---|
+| High: earliest signature removable (disagreement 1) | **Fixed** in `38f3d3f`. A `kid` without a `sig` fails every verification, with or without a key. |
+| Spec gap: unsigned ledger checked with a key (disagreement 2) | **Spec updated** (`docs/LEDGER_FORMAT.md` rule 3, in `38f3d3f`): it fails. This branch's verifier now applies rule 3, and the corpus expects `fail`. |
+| Medium: `check`/`show`/`report`/`list` don't load `signing-key.pub` | **Fixed** in `d3fa148`. Every command checks signatures with the case's public key and fails closed if it is missing or unreadable. |
+| Medium: pypdf floor 6.0.0 | **Fixed** in `d3fa148`: `pypdf>=6.21.2`. |
+| Low: lone surrogate exits 1 as a codec error | **Fixed** in `c0ee320`. Every command reports an integrity failure with exit 2, and `list` continues. |
+
+Also on `main` since the first run: a case's ledger must start with exactly one `case.create` entry (`d3a6a2d`). No corpus row exercises it yet.
+
+Re-running `independent/build_corpus.py` against that code: **20 runs, 0 disagreements** (`corpus/compare.json`, regenerated).
+
+Changes on this branch for the re-run:
+
+- `.gitattributes`: `independent/corpus/** -text`. The ledgers record the SHA-256 of every evidence file, and a Windows checkout with `core.autocrlf=true` rewrote the corpus files' line endings, so every evidence hash failed there.
+- `build_corpus.py` and `verify_ledger.py` write every text file with `\n` line endings on all platforms, so the corpus is the same wherever it's generated. The harness decodes the tool's output as UTF-8; it used the Windows default and printed a decode traceback.
+- The harness replaces local paths in captured output with placeholders (`<corpus>`, `<repo>`, `<home>`, `<tmp>`) before writing `compare.json`. The tool's error messages include file paths, and those carry the local username.
+- `verify_ledger.py` applies spec rule 3 (a public key given, no signed entries: fail). Its `--self-test` still passes.
 
 ## When implementation code was first read
 
@@ -89,12 +112,12 @@ The tool matches the README. The clean-room verifier matches the format spec. Th
 
 ## New issues
 
-1. **High — the earliest signature can be removed without touching the anchor.** Disagreement 1. Write access to `ledger.jsonl` is enough. `verify`, `verify --expect`, and `verify --expect --exact` all succeed, and the tool describes the stripped entry as pre-signing history. Later signatures remain valid, so the log still looks partly signed.
+1. **[Fixed in `38f3d3f`]** **High — the earliest signature can be removed without touching the anchor.** Disagreement 1. Write access to `ledger.jsonl` is enough. `verify`, `verify --expect`, and `verify --expect --exact` all succeed, and the tool describes the stripped entry as pre-signing history. Later signatures remain valid, so the log still looks partly signed.
 
-2. **Medium — `check`, `show`, `report`, and `list` do not load `signing-key.pub`.** On `13-nonascii-sig`, `verify` exits 2 (`signature is invalid`). The same case exits 0 for `check`, `show`, and `report`, and the report does not carry the integrity warning. Content tampering is still refused (finding 1, case `04`). Authorship failures are not, unless the caller passed `--public-key` or `--key-file`. `list` has the same gap: a hash-valid, wrongly signed ledger is not marked `INTEGRITY FAILED`.
+2. **[Fixed in `d3fa148`]** **Medium — `check`, `show`, `report`, and `list` do not load `signing-key.pub`.** On `13-nonascii-sig`, `verify` exits 2 (`signature is invalid`). The same case exits 0 for `check`, `show`, and `report`, and the report does not carry the integrity warning. Content tampering is still refused (finding 1, case `04`). Authorship failures are not, unless the caller passed `--public-key` or `--key-file`. `list` has the same gap: a hash-valid, wrongly signed ledger is not marked `INTEGRITY FAILED`.
 
-3. **Medium — the pypdf floor is 6.0.0.** That stops CVE-2025-55197 and, because there is no upper bound, does not block upgrades. A resolver that stays on 6.0.0 still accepts the parser bugs fixed through 6.21.2 (2026-10-21), including memory exhaustion and CVE-2026-113786. The byte caps and the child process limit the blast radius; they do not replace those fixes.
+3. **[Fixed in `d3fa148`]** **Medium — the pypdf floor is 6.0.0.** That stops CVE-2025-55197 and, because there is no upper bound, does not block upgrades. A resolver that stays on 6.0.0 still accepts the parser bugs fixed through 6.21.2 (2026-10-21), including memory exhaustion and CVE-2026-113786. The byte caps and the child process limit the blast radius; they do not replace those fixes.
 
-4. **Low — a lone surrogate aborts `verify` and `list` as a codec error.** Both verifiers reject the file, so this is not an integrity bypass. `list` does not finish the rest of the workspace, and the tool does not report the entry as a normal integrity failure.
+4. **[Fixed in `c0ee320`]** **Low — a lone surrogate aborts `verify` and `list` as a codec error.** Both verifiers reject the file, so this is not an integrity bypass. `list` does not finish the rest of the workspace, and the tool does not report the entry as a normal integrity failure.
 
 The unsigned-with-a-key disagreement is not a product bug. It is the README rule that the format spec omits.

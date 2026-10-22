@@ -19,6 +19,8 @@ Checks, in the words of the format spec:
 * Ed25519 (RFC 8032) over the 64 ASCII characters of hash
 * kid is the first 16 hex characters of SHA-256 of the raw 32-byte key
 * unsigned entries only before the first signed one
+* with a public key given, a ledger with no signed entries fails
+  (spec rule 3)
 * an anchor ``seq:hash`` names an entry that still has that hash;
   ``--exact`` requires that entry to be the last one
 * artifact stored_path files under evidence/ match sha256, and evidence/
@@ -468,6 +470,18 @@ def verify_ledger(
                 "error",
                 "public_key_required",
                 "signed entries present and no public key was available",
+            )
+        )
+
+    # Spec rule 3 (docs/LEDGER_FORMAT.md, added after the first comparison run):
+    # with a public key in hand, a ledger with no signed entries fails. The
+    # signatures may have been removed together with their kids.
+    if public_key is not None and entries and not seen_signed:
+        errors.append(
+            Finding(
+                "error",
+                "no_signed_entries",
+                "a public key was given but no entry is signed",
             )
         )
 
@@ -944,8 +958,8 @@ def self_test() -> None:
         root = Path(tmp)
         ledger = root / "ledger.jsonl"
         pub = root / "signing-key.pub"
-        pub.write_text(_SPEC_PUB_HEX + "\n", encoding="ascii")
-        ledger.write_text(line1 + "\n" + line2 + "\n", encoding="utf-8")
+        pub.write_text(_SPEC_PUB_HEX + "\n", encoding="ascii", newline="\n")
+        ledger.write_text(line1 + "\n" + line2 + "\n", encoding="utf-8", newline="\n")
         ok = verify_ledger(ledger, check_evidence=False)
         if not ok.ok:
             raise SystemExit(f"worked example failed: {ok.errors}")
@@ -957,13 +971,13 @@ def self_test() -> None:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        ledger.write_text(rotated + "\n" + line2 + "\n", encoding="utf-8")
+        ledger.write_text(rotated + "\n" + line2 + "\n", encoding="utf-8", newline="\n")
         if not verify_ledger(ledger, check_evidence=False).ok:
             raise SystemExit("reordered keys were rejected")
 
         # \\u escapes decode before the hash is computed.
         escaped = line1.replace("é", r"\u00e9").replace("—", r"\u2014")
-        ledger.write_text(escaped + "\n" + line2 + "\n", encoding="utf-8")
+        ledger.write_text(escaped + "\n" + line2 + "\n", encoding="utf-8", newline="\n")
         if not verify_ledger(ledger, check_evidence=False).ok:
             raise SystemExit("unicode escapes were rejected")
 
@@ -972,7 +986,7 @@ def self_test() -> None:
         del stripped["sig"]
         ledger.write_text(
             line1 + "\n" + json.dumps(stripped, separators=(",", ":")) + "\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="\n",
         )
         stripped_result = verify_ledger(ledger, check_evidence=False)
         if stripped_result.ok or not any(
@@ -982,7 +996,7 @@ def self_test() -> None:
 
         # Lone surrogate cannot be canonical UTF-8.
         surrogate_line = line1.replace("test", "test\\uD800")
-        ledger.write_text(surrogate_line + "\n", encoding="utf-8")
+        ledger.write_text(surrogate_line + "\n", encoding="utf-8", newline="\n")
         surrogate = verify_ledger(ledger, check_evidence=False)
         if surrogate.ok or not any(
             item.code in {"canonical", "hash"} for item in surrogate.errors
@@ -996,14 +1010,14 @@ def self_test() -> None:
             + "\n"
             + json.dumps(bad_sig, ensure_ascii=False, separators=(",", ":"))
             + "\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="\n",
         )
         non_ascii = verify_ledger(ledger, check_evidence=False)
         if non_ascii.ok or not any(item.code == "sig" for item in non_ascii.errors):
             raise SystemExit("non-ASCII signature was not rejected")
 
         anchor = f"2:{_SPEC_ENTRY2_HASH}"
-        ledger.write_text(line1 + "\n" + line2 + "\n", encoding="utf-8")
+        ledger.write_text(line1 + "\n" + line2 + "\n", encoding="utf-8", newline="\n")
         exact = verify_ledger(
             ledger, expect=anchor, exact=True, check_evidence=False
         )
@@ -1024,7 +1038,7 @@ def self_test() -> None:
         anchor1 = f"1:{_SPEC_ENTRY1_HASH}"
         # No signing-key.pub here: this chain is unsigned on purpose.
         pub.unlink()
-        ledger.write_text(line1 + "\n" + unsigned_line + "\n", encoding="utf-8")
+        ledger.write_text(line1 + "\n" + unsigned_line + "\n", encoding="utf-8", newline="\n")
         held = verify_ledger(ledger, expect=anchor1, exact=False, check_evidence=False)
         if not held.ok:
             raise SystemExit(f"non-exact anchor rejected a later entry: {held.errors}")
