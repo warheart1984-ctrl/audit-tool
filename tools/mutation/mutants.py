@@ -44,6 +44,12 @@ MUTANTS = [
     ("S10", "store.py", "if bad := _event_payload_problem(p):", "if False:", "malformed event.add rejected (T3)"),
     ("S11", "store.py", "if not path.resolve().is_relative_to(case_root) or not rel.startswith(\"evidence/\"):",
      "if False:", "recorded paths can't escape evidence/"),
+    ("K1", "store.py", "elif (directory / PUBLIC_KEY_FILE).exists():", "elif False:",
+     "every command checks signatures with the case's public key (PR #1)"),
+    ("K2", "store.py", "if self.ledger.verify_key is None and self.ledger.is_signed():\n            # Fail closed",
+     "if False:\n            # Fail closed", "signed case without a usable public key fails closed"),
+    ("K3", "store.py", "if self.ledger.signer is None and self.ledger.is_signed():", "if False:",
+     "no unsigned writes to a signed case"),
     # rules.py: the trust boundary (T4) and the gate
     ("R1", "rules.py", 'return bool(getattr(ev, name)) and ev.origin.get(name) == "confirmed"',
      "return bool(getattr(ev, name))", "extracted text can't clear findings (T4)"),

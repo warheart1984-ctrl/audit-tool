@@ -83,7 +83,7 @@ The gate is **PASS** only when a decision has a reason, a cited rule or code, an
   - malformed entries, which are skipped and listed instead of crashing the tool;
   - fields on a ledger line that the hash doesn't cover, so nothing can ride along uncommitted;
   - "confirmed" claimed when an event is created. Only an edit (`audit edit`, with a reason) confirms a fact.
-- **Read commands fail closed.** `check` and `show` refuse to run on a ledger that doesn't verify unless you pass `--unverified`. `report` still writes the file, with a warning at the very top, and exits with code 2. `list` marks such cases INTEGRITY FAILED.
+- **Read commands fail closed.** Every command verifies hashes *and* signatures before using a case. `check` and `show` refuse to run on a ledger that doesn't verify unless you pass `--unverified`. `report` still writes the file, with a warning at the very top, and exits with code 2. `list` marks such cases INTEGRITY FAILED.
 - Evidence is written only into a real `evidence/` folder inside the case, never through a link or junction, and existing files are never overwritten or followed.
 - Appends take a lock file, so two processes writing to one case can't lose or interleave entries.
 - Case IDs must be plain names: letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit, with no `..` and no Windows device names such as `CON`. A case can never be read or written outside the `cases/` folder, and two IDs can't name the same folder.
@@ -115,7 +115,8 @@ python -m audit_tool --public-key audit-signing.key.pub verify bank-2026   # wha
 Or set `AUDIT_KEY_FILE`, `AUDIT_PUBLIC_KEY` and `AUDIT_ACTOR`. Each new entry records an `actor`, the key id `kid` and a signature over its hash. Both `actor` and `kid` are covered by the hash.
 
 - **Private key:** keep it outside the cases folder (`keygen` refuses otherwise) and out of git. It is written owner-only. Whoever holds it can sign as you.
-- **Public key:** give it to a bank, a regulator or opposing counsel. It lets them check every signature but **not** forge one, unlike a shared-secret scheme. The case also ships a copy in `signing-key.pub`, which `verify` uses when no key is given. Anyone who can write the folder could swap that copy, so the key id it prints has to match the one you gave them separately.
+- **Public key:** give it to a bank, a regulator or opposing counsel. It lets them check every signature but **not** forge one, unlike a shared-secret scheme. The case also ships a copy in `signing-key.pub`, which **every command** uses when no key is given, so `check`, `show`, `report` and `list` also refuse a forged signature. A signed case whose `signing-key.pub` is missing or unreadable fails verification; deleting the file can't hide a forgery. Anyone who can write the folder could swap that copy, so the key id `verify` prints has to match the one you gave them separately.
+- **Writing to a signed case needs the private key.** `ingest`, `add`, `edit` and `attach` refuse without `--key-file`, rather than add an unsigned entry that would make the case fail verification from then on.
 - **What `verify` flags with a key:**
   - entries appended without the key after signing began;
   - entries signed by another key;

@@ -16,7 +16,7 @@ import shutil
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-from .ledger import Ledger, now_iso, parse_anchor, public_pem
+from .ledger import Ledger, load_public_key, now_iso, parse_anchor, public_pem
 from .models import EDITABLE, Artifact, Event
 from .secure import make_private_dir, private_file_mode
 
@@ -61,6 +61,15 @@ class Case:
         self.dir = directory
         self.ledger = Ledger(directory / "ledger.jsonl", signer=signer, verify_key=verify_key, actor=actor)
         self.evidence_dir = directory / "evidence"
+        self.key_source: str | None = "given" if (signer or verify_key) else None  # or "case-file"
+        self.key_error: str | None = None
+
+    def require_signer_if_signed(self) -> None:
+        """Refuse to write to a signed ledger without its private key: the entry would be unsigned
+        and the case would fail verification from then on."""
+        if self.ledger.signer is None and self.ledger.is_signed():
+            raise ValueError(f"case {self.id} is signed; pass --key-file (or set AUDIT_KEY_FILE) "
+                             "to add entries to it")
 
     def publish_public_key(self) -> None:
         """Ship the signer's public key with the case so others can check signatures.
@@ -289,6 +298,10 @@ class Case:
         problems = self.ledger.verify()
         if problems and problems[0].startswith("line "):
             return problems  # unreadable ledger: nothing below can be trusted
+        if self.ledger.verify_key is None and self.ledger.is_signed():
+            # Fail closed: otherwise deleting signing-key.pub would hide a forged signature.
+            problems.append("signatures can't be checked: " + (
+                self.key_error or f"no public key ({PUBLIC_KEY_FILE} is missing; pass --public-key)"))
         if expect_head:
             after = self.entries_after(expect_head)
             if after is None:
@@ -354,7 +367,22 @@ class Workspace:
         self.actor = actor
 
     def _case(self, directory: Path) -> Case:
-        case = Case(directory, signer=self.signer, verify_key=self.verify_key, actor=self.actor)
+        """Open a case with the right key for checking signatures.
+
+        Without a key given on the command line, the public key shipped in the
+        case folder is used, so every command (not just `verify`) checks
+        signatures. If that file can't be loaded, the case fails verification.
+        """
+        verify_key, source, error = self.verify_key, None, None
+        if self.signer is not None or verify_key is not None:
+            source = "given"
+        elif (directory / PUBLIC_KEY_FILE).exists():
+            try:
+                verify_key, source = load_public_key(directory / PUBLIC_KEY_FILE), "case-file"
+            except ValueError as exc:
+                error = f"{PUBLIC_KEY_FILE} could not be loaded ({exc})"
+        case = Case(directory, signer=self.signer, verify_key=verify_key, actor=self.actor)
+        case.key_source, case.key_error = source, error
         case.publish_public_key()
         return case
 

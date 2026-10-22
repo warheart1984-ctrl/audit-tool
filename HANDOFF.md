@@ -45,7 +45,7 @@ Three outside security reviews were done. Every confirmed finding was fixed with
 - **Ledger integrity:**
   - Edits, deletions, unreadable lines and fields outside the hash are all detected.
   - `verify --expect <seq>:<hash>` detects a full ledger rewrite and counts the entries added after the anchor. With `--exact`, deletions from the end are caught too.
-  - With an Ed25519 key, entries carry an author, a key id and a signature. Appends made without the key are flagged. The public key verifies but can't forge, so it can be handed to the other side.
+  - With an Ed25519 key, entries carry an author, a key id and a signature. Appends made without the key are flagged, and so is a signature removed while its `kid` remains. Every command checks signatures with the case's `signing-key.pub` by default and fails closed if it's missing. The public key verifies but can't forge, so it can be handed to the other side.
   - Confirmation can't be claimed when an event is created, only through an edit.
 - **Replay:** malformed or orphaned entries are skipped and reported, never crashed on. IDs are never reused.
 - **Concurrency:** a lock file around appends. Without it, Windows lost about 8% of entries under 4 parallel writers.
@@ -74,8 +74,8 @@ Three outside security reviews were done. Every confirmed finding was fixed with
 
 ```bash
 pip install -e ".[ocr,sign,dev]"
-python -m pytest                     # 134 tests; platform-specific tests skip where they don't apply
-python tools/mutation/run.py         # mutation run: plants 49 known defects, checks each is caught (~20 min)
+python -m pytest                     # 145 tests; platform-specific tests skip where they don't apply
+python tools/mutation/run.py         # mutation run: plants 52 known defects, checks each is caught (~20 min)
 python tests/make_fixtures.py        # regenerates OCR/PDF sample files into tests/fixtures/ (git-ignored)
 ```
 
